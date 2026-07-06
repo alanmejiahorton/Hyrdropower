@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Catawba-Wateree Hydro Model</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <header class="site-header">
+      <nav aria-label="Primary">
+        <a href="#model">Model</a>
+        <a href="#scenario">Scenario</a>
+        <a href="#analytics">Analytics</a>
+        <a href="#research">Research MPC</a>
+        <a href="#sources">Sources</a>
+      </nav>
+      <section class="intro" id="model">
+        <p class="kicker">Duke Energy / Project No. 2232</p>
+        <h1>Catawba-Wateree Hydroelectric Project</h1>
+        <p class="lede">A compact operating model for the 11-reservoir, 12-powerhouse cascade from Lake James to Lake Wateree.</p>
+        <div class="quick-links">
+          <a href="https://www.duke-energy.com/community/lakes/hydroelectric-relicensing/catawba" target="_blank" rel="noreferrer">Duke relicensing page</a>
+          <span aria-hidden="true">/</span>
+          <a href="https://www.duke-energy.com/community/lakes/hydroelectric-relicensing/catawba/license-agreement" target="_blank" rel="noreferrer">License agreement</a>
+        </div>
+      </section>
+    </header>
+
+    <main>
+      <section class="metrics" aria-label="System metrics">
+        <article>
+          <span>Total Capacity</span>
+          <strong id="metric-capacity">819.1 MW</strong>
+          <small>Authorized installed capacity</small>
+        </article>
+        <article>
+          <span>Simulated Dispatch</span>
+          <strong id="metric-generation">0 MW</strong>
+          <small id="metric-generation-note">Current scenario output</small>
+        </article>
+        <article>
+          <span>Usable Storage</span>
+          <strong id="metric-storage">0%</strong>
+          <small id="metric-storage-note">Weighted by reservoir scale</small>
+        </article>
+        <article>
+          <span>Water Value</span>
+          <strong id="metric-water-value">$0/MWh</strong>
+          <small>Scenario shadow price proxy</small>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <div class="panel topology-panel" aria-label="Interactive cascade topology">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Interactive Topology</p>
+              <h2>Reservoir Cascade</h2>
+            </div>
+            <div class="map-tools" aria-label="Map controls">
+              <button class="icon-button" id="zoom-out" title="Zoom out" aria-label="Zoom out">-</button>
+              <button class="icon-button" id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
+              <button class="icon-button" id="reset-view" title="Reset map and selected development" aria-label="Reset map and selected development">R</button>
+            </div>
+          </div>
+          <svg id="topology" viewBox="0 0 960 620" role="img" aria-labelledby="topology-title topology-desc">
+            <title id="topology-title">Catawba-Wateree reservoir cascade topology</title>
+            <desc id="topology-desc">A pannable basin map showing reservoirs and powerhouses ordered from upstream North Carolina to downstream South Carolina.</desc>
+          </svg>
+        </div>
+
+        <aside class="panel detail-panel" aria-live="polite">
+          <p class="eyebrow">Selected Development</p>
+          <h2 id="detail-name">System Overview</h2>
+          <p id="detail-summary">Click a reservoir or station to inspect storage, capacity, guide curve, minimum flow, recreation, and compliance notes.</p>
+          <dl class="detail-grid">
+            <div><dt>Reservoir</dt><dd id="detail-reservoir">All reservoirs</dd></div>
+            <div><dt>Capacity</dt><dd id="detail-capacity">819.1 MW</dd></div>
+            <div><dt>Storage</dt><dd id="detail-storage">2,298,600 acre-ft total scale</dd></div>
+            <div><dt>Minimum Flow</dt><dd id="detail-flow">System monitored</dd></div>
+          </dl>
+          <div class="bar-group">
+            <label for="detail-storage-bar">Relative storage</label>
+            <div class="bar"><span id="detail-storage-bar"></span></div>
+          </div>
+          <div class="note-list" id="detail-notes"></div>
+        </aside>
+      </section>
+
+      <section class="panel scenario" id="scenario">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Scenario Builder</p>
+            <h2>Dispatch And Water Management</h2>
+          </div>
+          <button id="export-csv">Export CSV</button>
+        </div>
+        <div class="controls">
+          <label for="inflow">
+            Basin inflow
+            <input id="inflow" type="range" min="35" max="140" value="88">
+            <span id="inflow-label">88%</span>
+          </label>
+          <label for="demand">
+            Peak demand signal
+            <input id="demand" type="range" min="20" max="100" value="68">
+            <span id="demand-label">68%</span>
+          </label>
+          <label for="price">
+            Market price
+            <input id="price" type="range" min="20" max="130" value="72">
+            <span id="price-label">$72/MWh</span>
+          </label>
+          <label for="reserve">
+            Reserve holdback
+            <input id="reserve" type="range" min="0" max="35" value="12">
+            <span id="reserve-label">12%</span>
+          </label>
+          <label for="outage">
+            Forced outage
+            <select id="outage">
+              <option value="none">None</option>
+            </select>
+          </label>
+          <label class="toggle">
+            <input id="spring-stabilization" type="checkbox" checked>
+            <span>Spring level stabilization</span>
+          </label>
+        </div>
+        <div class="release-schedule" aria-label="Individual reservoir release schedule controls">
+          <div class="release-heading">
+            <div>
+              <p class="eyebrow">Individual Release Schedules</p>
+              <h3>Reservoir Release Targets</h3>
+            </div>
+            <button id="reset-releases">Reset Releases</button>
+          </div>
+          <div id="release-controls" class="release-controls"></div>
+        </div>
+      </section>
+
+      <section class="research-workbench" id="research">
+        <div class="panel research-controls-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Research MPC Workbench</p>
+              <h2>Two-Stage Robust Scheduling Sandbox</h2>
+            </div>
+            <button id="step-mpc">Step Next 24 Hours</button>
+          </div>
+          <div class="research-controls">
+            <label for="mpc-month">
+              Start month
+              <select id="mpc-month">
+                <option value="0">January</option>
+                <option value="1">February</option>
+                <option value="2" selected>March</option>
+                <option value="3">April</option>
+                <option value="4">May</option>
+                <option value="5">June</option>
+                <option value="6">July</option>
+                <option value="7">August</option>
+                <option value="8">September</option>
+                <option value="9">October</option>
+                <option value="10">November</option>
+                <option value="11">December</option>
+              </select>
+            </label>
+            <label for="mpc-date">
+              Start date
+              <select id="mpc-date"></select>
+              <span id="mpc-day-label">Day 66 / Mar 7</span>
+            </label>
+            <label for="inflow-uncertainty">
+              Inflow box
+              <input id="inflow-uncertainty" type="range" min="0" max="50" value="30">
+              <span id="inflow-uncertainty-label">±30%</span>
+            </label>
+            <label for="lmp-uncertainty">
+              LMP box
+              <input id="lmp-uncertainty" type="range" min="0" max="35" value="20">
+              <span id="lmp-uncertainty-label">±20%</span>
+            </label>
+            <label for="forecast-bias">
+              Forecast bias
+              <input id="forecast-bias" type="range" min="80" max="140" value="100">
+              <span id="forecast-bias-label">1.00x</span>
+            </label>
+            <label for="lookahead-window">
+              Lookahead
+              <select id="lookahead-window">
+                <option value="168">1 week</option>
+                <option value="336">2 weeks</option>
+                <option value="672" selected>4 weeks</option>
+              </select>
+            </label>
+            <label for="mpc-mode">
+              Uncertainty mode
+              <select id="mpc-mode">
+                <option value="dynamic" selected>Monthly dynamic</option>
+                <option value="static">Static box</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="research-grid">
+          <article class="panel">
+            <p class="eyebrow">Deterministic vs Robust MPC</p>
+            <h2>Research Scorecard</h2>
+            <div class="scorecard" id="research-scorecard"></div>
+          </article>
+          <article class="panel chart-panel">
+            <p class="eyebrow">Box Uncertainty Overlay</p>
+            <h2>Inflow And LMP Forecast Envelope</h2>
+            <svg id="uncertainty-chart" viewBox="0 0 620 300" role="img" aria-label="Inflow and LMP uncertainty envelope chart"></svg>
+          </article>
+          <article class="panel chart-panel">
+            <p class="eyebrow">True Storage Accounting</p>
+            <h2>Storage And Emergency Recourse</h2>
+            <svg id="storage-chart" viewBox="0 0 620 300" role="img" aria-label="Storage trajectory with shortage and spillage recourse chart"></svg>
+          </article>
+          <article class="panel">
+            <p class="eyebrow">Cascade Propagation</p>
+            <h2>Lake James Shock Travel</h2>
+            <div id="cascade-propagation" class="propagation-list"></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="analytics-grid" id="analytics">
+        <article class="panel">
+          <p class="eyebrow">Hourly/Daily Dispatch</p>
+          <h2>Station Schedule</h2>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Development</th>
+                  <th>Reservoir</th>
+                  <th>Dispatch</th>
+                  <th>Scheduled Release</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="dispatch-body"></tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="panel">
+          <p class="eyebrow">Compliance Tracking</p>
+          <h2>Operational Signals</h2>
+          <div id="compliance-list" class="signal-list"></div>
+        </article>
+
+        <article class="panel">
+          <p class="eyebrow">Medium-Term Planning</p>
+          <h2>Water Value Curve</h2>
+          <svg id="water-value-chart" viewBox="0 0 520 240" role="img" aria-label="Water value response curve"></svg>
+        </article>
+      </section>
+
+      <section class="panel sources" id="sources">
+        <p class="eyebrow">Model Notes</p>
+        <h2>Sources And Assumptions</h2>
+        <p>The model uses the user-provided outline for feature scope, the user-provided data PDF for reservoir storage scale estimates, and FERC's November 25, 2015 order for licensed capacity, project configuration, operating guide-curve notes, recreation facilities, and environmental measures.</p>
+        <ul>
+          <li>FERC order: new 40-year license issued November 25, 2015; total authorized installed capacity is 819.102 MW.</li>
+          <li>Research mode is based on the provided robust MPC paper: 4-week rolling horizon, 24-hour commitments, inflow/LMP box uncertainty, emergency shortage/spillage recourse, and Bridgewater-focused validation.</li>
+          <li>Duke page: non-federal hydro projects relicense under the Federal Power Act, generally for 30-50 years.</li>
+          <li>Simulation math is a planning proxy, not a SCADA, CHEOPS, Pyomo, or FERC compliance engine.</li>
+        </ul>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
