@@ -214,6 +214,8 @@ const releaseMultipliers = Object.fromEntries(developments.map((d) => [d.id, 100
 const mapState = { scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0, originX: 0, originY: 0 };
 
 const controls = {
+  usgsMode: document.querySelector("#usgs-mode"),
+  usgsDate: document.querySelector("#usgs-date"),
   inflow: document.querySelector("#inflow"),
   demand: document.querySelector("#demand"),
   price: document.querySelector("#price"),
@@ -235,6 +237,20 @@ const researchControls = {
 const selected = {
   id: null
 };
+
+let usgsBaseline = null;
+
+const statusDefinitions = {
+  Normal: "Operating within modeled dispatch, release, storage, and compliance guardrails.",
+  Stabilize: "Spring reservoir level stabilization is active for this reservoir, limiting discretionary fluctuation.",
+  Watch: "Low-inflow watch condition: minimum-flow commitments are becoming tight relative to modeled release.",
+  "Spill risk": "High-flow condition in a small operational pool where water may bypass turbines and reduce generation value.",
+  Drawdown: "Custom release schedule is high enough to draw down a small operational pool faster than nominal operation.",
+  "Below min": "Scheduled release falls below the modeled daily minimum flow target.",
+  Outage: "Forced outage removes this development from available generating capacity."
+};
+
+const signalPriority = { alert: 0, warning: 1, normal: 2 };
 
 function fmt(value, digits = 0) {
   return value.toLocaleString(undefined, {
@@ -283,9 +299,9 @@ function seedReleaseControls() {
 }
 
 function scenario() {
-  const inflow = Number(controls.inflow.value);
+  const inflow = controls.usgsMode.checked && usgsBaseline ? usgsBaseline.inflowPercent : Number(controls.inflow.value);
   const demand = Number(controls.demand.value);
-  const price = Number(controls.price.value);
+  const price = controls.usgsMode.checked && usgsBaseline ? usgsBaseline.price : Number(controls.price.value);
   const reserve = Number(controls.reserve.value);
   const spring = controls.spring.checked;
   const droughtPenalty = inflow < 55 ? (55 - inflow) * 0.006 : 0;
@@ -546,14 +562,20 @@ function renderDispatch(rows) {
       <td>${d.reservoir}</td>
       <td>${fmt(d.dispatch, 1)} MW / ${fmt((d.dispatch / d.capacity) * 100)}%</td>
       <td>${fmt(d.release)} cfs / ${fmt(d.releaseMultiplier * 100)}%</td>
-      <td><span class="status-pill ${statusClass}">${d.status}</span></td>
+      <td><button class="status-pill ${statusClass}" data-status="${d.status}" type="button">${d.status}</button></td>
     `;
     body.appendChild(tr);
   });
 
   body.querySelectorAll("button").forEach((button) => {
-    button.addEventListener("click", () => selectDevelopment(button.dataset.id));
+    if (button.dataset.id) button.addEventListener("click", () => selectDevelopment(button.dataset.id, true));
+    if (button.dataset.status) button.addEventListener("click", () => showStatusDefinition(button.dataset.status));
   });
+}
+
+function showStatusDefinition(status) {
+  const box = document.querySelector("#status-info");
+  box.innerHTML = `<strong>${status}</strong>: ${statusDefinitions[status] || "No definition available for this status."}`;
 }
 
 function updateReleaseLabels(rows) {
@@ -571,30 +593,35 @@ function renderCompliance(state, rows, availableCapacity) {
 
   const signals = [
     {
+      label: "Inflow",
       level: state.inflow < 55 ? "alert" : state.inflow < 70 ? "warning" : "normal",
       text: state.inflow < 55
         ? "Low Inflow Protocol watch: scenario inflows are below 55% of normal."
         : "Minimum-flow releases are represented for each development."
     },
     {
+      label: "Spring stabilization",
       level: state.spring ? "warning" : "normal",
       text: state.spring
         ? "Spring stabilization active for Lake Wateree, Wylie, Norman, and James."
         : "Spring stabilization disabled; reservoirs can fluctuate more freely in the model."
     },
     {
+      label: "Availability",
       level: availableCapacity < totalCapacity ? "warning" : "normal",
       text: availableCapacity < totalCapacity
         ? `Forced outage reduces available capacity to ${fmt(availableCapacity, 1)} MW.`
         : "All modeled powerhouses are available."
     },
     {
+      label: "Spillage",
       level: rows.some((d) => d.status === "Spill risk") ? "warning" : "normal",
       text: rows.some((d) => d.status === "Spill risk")
         ? "High-flow scenario flags small downstream pools for spillage tracking."
         : "No small-pool spill risk is currently flagged."
     },
     {
+      label: "Release schedule",
       level: rows.some((d) => d.status === "Below min") ? "alert" : rows.some((d) => d.status === "Drawdown") ? "warning" : "normal",
       text: rows.some((d) => d.status === "Below min")
         ? "At least one custom release schedule is below the modeled daily minimum flow target."
@@ -603,15 +630,16 @@ function renderCompliance(state, rows, availableCapacity) {
           : "Individual release schedules are within modeled guardrails."
     },
     {
+      label: "Environmental compliance",
       level: "normal",
       text: "Fishway prescriptions and water-quality monitoring are tracked as compliance obligations, not optimized here."
     }
   ];
 
-  signals.forEach((signal) => {
+  signals.sort((a, b) => signalPriority[a.level] - signalPriority[b.level]).forEach((signal) => {
     const div = document.createElement("div");
     div.className = `signal ${signal.level}`;
-    div.textContent = signal.text;
+    div.innerHTML = `<strong>${signal.label}</strong><span>${signal.text}</span>`;
     list.appendChild(div);
   });
 }
@@ -696,7 +724,7 @@ function drawWaterValueChart(state) {
   path.setAttribute("d", line);
   svg.appendChild(path);
 
-  const current = { storage: state.storagePercent, value: state.waterValue };
+  const current = { storage: Math.max(35, Math.min(95, state.storagePercent)), value: state.waterValue };
   const dot = document.createElementNS(ns, "circle");
   dot.setAttribute("class", "chart-dot");
   dot.setAttribute("cx", x(current.storage));
@@ -857,6 +885,8 @@ function drawUncertaintyChart(state, series) {
   const yLmp = (v) => height - pad - (v / maxLmp) * (height - pad * 2);
   const upper = series.map((p, i) => `${i ? "L" : "M"} ${x(p.h)} ${yInflow(p.nominalInflow * (1 + state.effectiveInflowBox / 100))}`).join(" ");
   const lower = series.slice().reverse().map((p) => `L ${x(p.h)} ${yInflow(p.nominalInflow * (1 - state.effectiveInflowBox / 100))}`).join(" ");
+  const lmpUpper = series.map((p, i) => `${i ? "L" : "M"} ${x(p.h)} ${yLmp(p.lmp * (1 + state.effectiveLmpBox / 100))}`).join(" ");
+  const lmpLower = series.slice().reverse().map((p) => `L ${x(p.h)} ${yLmp(p.lmp * (1 - state.effectiveLmpBox / 100))}`).join(" ");
   const nominal = series.map((p, i) => `${i ? "L" : "M"} ${x(p.h)} ${yInflow(p.nominalInflow)}`).join(" ");
   const lmp = series.map((p, i) => `${i ? "L" : "M"} ${x(p.h)} ${yLmp(p.lmp)}`).join(" ");
 
@@ -864,6 +894,7 @@ function drawUncertaintyChart(state, series) {
   svg.appendChild(svgEl("line", { class: "chart-axis", x1: pad, y1: pad, x2: pad, y2: height - pad }));
   svg.appendChild(svgEl("line", { class: "chart-axis", x1: width - pad, y1: pad, x2: width - pad, y2: height - pad }));
   svg.appendChild(svgEl("path", { class: "uncertainty-band", d: `${upper} ${lower} Z` }));
+  svg.appendChild(svgEl("path", { class: "lmp-band", d: `${lmpUpper} ${lmpLower} Z` }));
   svg.appendChild(svgEl("path", { class: "chart-line", d: nominal }));
   svg.appendChild(svgEl("path", { class: "lmp-line", d: lmp }));
   [0, 0.25, 0.5, 0.75, 1].forEach((ratio) => {
@@ -886,16 +917,23 @@ function drawUncertaintyChart(state, series) {
     svg.appendChild(text);
   });
   [
-    { text: "Blue line: nominal inflow forecast", x: pad + 8, y: 20, cls: "chart-label" },
-    { text: `Blue band: inflow box ±${fmt(state.effectiveInflowBox)}%`, x: pad + 8, y: 38, cls: "chart-label" },
-    { text: `Gold dashed: LMP proxy ±${fmt(state.effectiveLmpBox)}%`, x: width - 212, y: 20, cls: "chart-label" },
-    { text: "Left axis: CF/hr", x: 6, y: 28, cls: "chart-label" },
-    { text: "Right axis: $/MWh", x: width - 100, y: 40, cls: "chart-label" }
+    { text: "CF/hr", x: 6, y: 28, cls: "chart-label" },
+    { text: "$/MWh", x: width - 88, y: 28, cls: "chart-label" },
+    { text: "Hour of committed day", x: width / 2 - 58, y: height - 7, cls: "chart-label" }
   ].forEach((label) => {
     const text = svgEl("text", { class: label.cls, x: label.x, y: label.y });
     text.textContent = label.text;
     svg.appendChild(text);
   });
+  const legend = svgEl("g", { class: "chart-legend legend-box", transform: "translate(70 48)" });
+  legend.innerHTML = `
+    <rect class="legend-bg" x="-10" y="-18" width="218" height="76" rx="6"></rect>
+    <line class="chart-line" x1="0" y1="0" x2="26" y2="0"></line><text x="34" y="4">Nominal inflow forecast</text>
+    <rect class="uncertainty-band" x="0" y="13" width="26" height="10"></rect><text x="34" y="23">Inflow box ±${fmt(state.effectiveInflowBox)}%</text>
+    <line class="lmp-line" x1="0" y1="38" x2="26" y2="38"></line><text x="34" y="42">LMP proxy</text>
+    <rect class="lmp-band" x="0" y="49" width="26" height="10"></rect><text x="34" y="59">LMP box ±${fmt(state.effectiveLmpBox)}%</text>
+  `;
+  svg.appendChild(legend);
 }
 
 function drawStorageChart(base, robust) {
@@ -944,8 +982,9 @@ function drawStorageChart(base, robust) {
     text.textContent = label.text;
     svg.appendChild(text);
   });
-  const legend = svgEl("g", { class: "chart-legend", transform: `translate(${width - 178} 18)` });
+  const legend = svgEl("g", { class: "chart-legend legend-box", transform: `translate(${width - 178} 18)` });
   legend.innerHTML = `
+    <rect class="legend-bg" x="-10" y="-18" width="172" height="94" rx="6"></rect>
     <line class="base-line" x1="0" y1="0" x2="28" y2="0"></line><text x="36" y="4">Deterministic MPC</text>
     <line class="robust-line" x1="0" y1="20" x2="28" y2="20"></line><text x="36" y="24">Robust MPC</text>
     <rect class="rule-curve-band" x="0" y="34" width="28" height="10"></rect><text x="36" y="44">Rule-curve band</text>
@@ -1030,6 +1069,32 @@ function updateLabels(state) {
   document.querySelector("#demand-label").textContent = `${state.demand}%`;
   document.querySelector("#price-label").textContent = `$${state.price}/MWh`;
   document.querySelector("#reserve-label").textContent = `${state.reserve}%`;
+  if (controls.usgsMode.checked && usgsBaseline) {
+    document.querySelector("#usgs-status").textContent = `Loaded ${usgsBaseline.sourceDate}: ${usgsBaseline.note}`;
+  } else if (controls.usgsMode.checked) {
+    document.querySelector("#usgs-status").textContent = "Loading USGS baseline...";
+  } else {
+    document.querySelector("#usgs-status").textContent = "Manual sandbox mode";
+  }
+}
+
+async function refreshUSGSBaseline() {
+  controls.usgsDate.disabled = !controls.usgsMode.checked;
+  controls.inflow.disabled = controls.usgsMode.checked;
+  controls.price.disabled = controls.usgsMode.checked;
+  if (!controls.usgsMode.checked) {
+    usgsBaseline = null;
+    render();
+    return;
+  }
+  document.querySelector("#usgs-status").textContent = "Loading USGS baseline...";
+  try {
+    usgsBaseline = await window.usgsData.loadUSGSBaseline(controls.usgsDate.value);
+  } catch (error) {
+    usgsBaseline = null;
+    document.querySelector("#usgs-status").textContent = "USGS cache unavailable; using manual values.";
+  }
+  render();
 }
 
 function render() {
@@ -1052,9 +1117,12 @@ function render() {
   renderResearch();
 }
 
-function selectDevelopment(id) {
+function selectDevelopment(id, focusMap = false) {
   selected.id = id;
   render();
+  if (focusMap) {
+    document.querySelector(".workspace")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
 }
 
 function exportCsv() {
@@ -1088,6 +1156,8 @@ seedReleaseControls();
 seedDateOptions();
 initMapInteractions();
 Object.values(controls).forEach((control) => control.addEventListener("input", render));
+controls.usgsMode.addEventListener("change", refreshUSGSBaseline);
+controls.usgsDate.addEventListener("change", refreshUSGSBaseline);
 Object.values(researchControls).forEach((control) => control.addEventListener("input", render));
 controls.outage.addEventListener("change", render);
 researchControls.month.addEventListener("change", () => {

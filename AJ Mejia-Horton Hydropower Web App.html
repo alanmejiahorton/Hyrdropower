@@ -30,22 +30,22 @@
     <main>
       <section class="metrics" aria-label="System metrics">
         <article>
-          <span>Total Capacity</span>
+          <span>Total Capacity <button class="help-tip" type="button" aria-label="Total Capacity formula" title="Sum of authorized installed MW across modeled developments; inoperable Great Falls capacity is excluded.">i</button></span>
           <strong id="metric-capacity">819.1 MW</strong>
           <small>Authorized installed capacity</small>
         </article>
         <article>
-          <span>Simulated Dispatch</span>
+          <span>Simulated Dispatch <button class="help-tip" type="button" aria-label="Simulated Dispatch formula" title="Sum of each station dispatch after waterAvailability, dispatchFactor, release schedule multipliers, reserves, and outages are applied.">i</button></span>
           <strong id="metric-generation">0 MW</strong>
           <small id="metric-generation-note">Current scenario output</small>
         </article>
         <article>
-          <span>Usable Storage</span>
+          <span>Usable Storage <button class="help-tip" type="button" aria-label="Usable Storage formula" title="Scenario storage proxy weighted by reservoir scale, basin inflow, demand, and spring stabilization constraints.">i</button></span>
           <strong id="metric-storage">0%</strong>
           <small id="metric-storage-note">Weighted by reservoir scale</small>
         </article>
         <article>
-          <span>Water Value</span>
+          <span>Water Value <button class="help-tip" type="button" aria-label="Water Value formula" title="Shadow-price proxy: market price adjusted by scarcity, demand pressure, and current storage percentage.">i</button></span>
           <strong id="metric-water-value">$0/MWh</strong>
           <small>Scenario shadow price proxy</small>
         </article>
@@ -61,7 +61,9 @@
             <div class="map-tools" aria-label="Map controls">
               <button class="icon-button" id="zoom-out" title="Zoom out" aria-label="Zoom out">-</button>
               <button class="icon-button" id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
-              <button class="icon-button" id="reset-view" title="Reset map and selected development" aria-label="Reset map and selected development">R</button>
+              <button class="icon-button" id="reset-view" title="Reset map and selected development" aria-label="Reset map and selected development">
+                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.68V3h-5.68l1.9 1.9A10 10 0 1 0 22 12h-2Z"></path></svg>
+              </button>
             </div>
           </div>
           <svg id="topology" viewBox="0 0 960 620" role="img" aria-labelledby="topology-title topology-desc">
@@ -97,6 +99,15 @@
           <button id="export-csv">Export CSV</button>
         </div>
         <div class="controls">
+          <label class="toggle mode-toggle">
+            <input id="usgs-mode" type="checkbox">
+            <span>Historical USGS streamflow mode</span>
+          </label>
+          <label for="usgs-date" class="usgs-date-field">
+            USGS baseline date
+            <input id="usgs-date" type="date" value="2019-03-07" min="2008-01-01" max="2024-12-31" disabled>
+            <span id="usgs-status">Manual sandbox mode</span>
+          </label>
           <label for="inflow">
             Basin inflow
             <input id="inflow" type="range" min="35" max="140" value="88">
@@ -133,6 +144,7 @@
             <div>
               <p class="eyebrow">Individual Release Schedules</p>
               <h3>Reservoir Release Targets</h3>
+              <p class="microcopy">Values above 100% represent discretionary high-flow releases, drawdown operations, or emergency spill management beyond nominal base allocations.</p>
             </div>
             <button id="reset-releases">Reset Releases</button>
           </div>
@@ -252,12 +264,14 @@
         <article class="panel">
           <p class="eyebrow">Compliance Tracking</p>
           <h2>Operational Signals</h2>
+          <div id="status-info" class="status-info">Click a status badge in the station schedule to see its definition.</div>
           <div id="compliance-list" class="signal-list"></div>
         </article>
 
         <article class="panel">
           <p class="eyebrow">Medium-Term Planning</p>
-          <h2>Water Value Curve</h2>
+          <h2>Hydropower-Value Curve</h2>
+          <p class="chart-copy">This curve is a planning proxy for the shadow price of stored water: as storage gets scarce, each remaining unit of water carries higher expected dispatch value.</p>
           <svg id="water-value-chart" viewBox="0 0 520 240" role="img" aria-label="Water value response curve"></svg>
         </article>
       </section>
@@ -265,16 +279,17 @@
       <section class="panel sources" id="sources">
         <p class="eyebrow">Model Notes</p>
         <h2>Sources And Assumptions</h2>
-        <p>The model uses the user-provided outline for feature scope, the user-provided data PDF for reservoir storage scale estimates, and FERC's November 25, 2015 order for licensed capacity, project configuration, operating guide-curve notes, recreation facilities, and environmental measures.</p>
-        <ul>
-          <li>FERC order: new 40-year license issued November 25, 2015; total authorized installed capacity is 819.102 MW.</li>
-          <li>Research mode is based on the provided robust MPC paper: 4-week rolling horizon, 24-hour commitments, inflow/LMP box uncertainty, emergency shortage/spillage recourse, and Bridgewater-focused validation.</li>
-          <li>Duke page: non-federal hydro projects relicense under the Federal Power Act, generally for 30-50 years.</li>
-          <li>Simulation math is a planning proxy, not a SCADA, CHEOPS, Pyomo, or FERC compliance engine.</li>
-        </ul>
+        <p>The model uses the user-provided outline and data PDFs for feature scope and storage estimates, plus official hydropower, streamflow, and robust-optimization references for context.</p>
+        <div class="source-grid">
+          <a href="https://www.ferc.gov/sites/default/files/2020-05/P-2232-522.pdf" target="_blank" rel="noreferrer"><strong>FERC Order</strong><span>November 25, 2015 Catawba-Wateree new license order, Project No. 2232-522.</span></a>
+          <a href="https://www.duke-energy.com/community/lakes/hydroelectric-relicensing/catawba" target="_blank" rel="noreferrer"><strong>Duke Relicensing Portal</strong><span>Project background, license agreement links, and Duke Energy lake resources.</span></a>
+          <a href="https://doi.org/10.1007/s10107-003-0454-y" target="_blank" rel="noreferrer"><strong>Two-Stage Robust Optimization</strong><span>Ben-Tal et al. adjustable robust counterpart foundation used by robust MPC literature.</span></a>
+          <a href="https://waterdata.usgs.gov/" target="_blank" rel="noreferrer"><strong>USGS Water Data</strong><span>Historical and current streamflow observations for hydrologic baseline construction.</span></a>
+        </div>
       </section>
     </main>
 
+    <script src="usgsData.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
