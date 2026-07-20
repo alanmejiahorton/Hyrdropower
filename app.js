@@ -252,6 +252,29 @@ const statusDefinitions = {
 
 const signalPriority = { alert: 0, warning: 1, normal: 2 };
 
+const metricHelp = {
+  capacity: {
+    title: "Total Capacity",
+    equation: "Total capacity = sum(authorized MW for modeled developments)",
+    description: "This is the licensed installed capacity basis used by the app. The inoperable 24 MW Great Falls capacity is excluded, matching the project capacity treatment in the FERC order."
+  },
+  dispatch: {
+    title: "Simulated Dispatch",
+    equation: "Dispatch = sum(min(capacity, capacity x dispatchFactor x localFlow x scheduleEffect))",
+    description: "Each station output is shaped by basin water availability, demand, market price, reserve holdback, outages, and the individual release multiplier."
+  },
+  storage: {
+    title: "Usable Storage",
+    equation: "Storage % = clamp(47 + 0.43 x inflow - 0.12 x demand - springPenalty, 31, 99)",
+    description: "This planning proxy estimates system storage pressure from hydrologic supply, demand draw, and spring stabilization constraints, then weights the acre-foot display by total reservoir scale."
+  },
+  waterValue: {
+    title: "Water Value",
+    equation: "Water value = max(8, price x (1.35 - storage% / 130) + 0.12 x demand + droughtPremium)",
+    description: "This approximates the shadow price of stored water. Scarcer storage and higher demand raise the value of holding or carefully dispatching water."
+  }
+};
+
 function fmt(value, digits = 0) {
   return value.toLocaleString(undefined, {
     maximumFractionDigits: digits,
@@ -576,6 +599,13 @@ function renderDispatch(rows) {
 function showStatusDefinition(status) {
   const box = document.querySelector("#status-info");
   box.innerHTML = `<strong>${status}</strong>: ${statusDefinitions[status] || "No definition available for this status."}`;
+}
+
+function showMetricHelp(key) {
+  const info = metricHelp[key];
+  const panel = document.querySelector("#metric-info-panel");
+  if (!info || !panel) return;
+  panel.innerHTML = `<strong>${info.title}</strong><code>${info.equation}</code><span>${info.description}</span>`;
 }
 
 function updateReleaseLabels(rows) {
@@ -1070,7 +1100,7 @@ function updateLabels(state) {
   document.querySelector("#price-label").textContent = `$${state.price}/MWh`;
   document.querySelector("#reserve-label").textContent = `${state.reserve}%`;
   if (controls.usgsMode.checked && usgsBaseline) {
-    document.querySelector("#usgs-status").textContent = `Loaded ${usgsBaseline.sourceDate}: ${usgsBaseline.note}`;
+    document.querySelector("#usgs-status").textContent = `Loaded ${usgsBaseline.sourceDate}: ${fmt(usgsBaseline.totalCfs)} cfs total. ${usgsBaseline.note}`;
   } else if (controls.usgsMode.checked) {
     document.querySelector("#usgs-status").textContent = "Loading USGS baseline...";
   } else {
@@ -1155,6 +1185,9 @@ seedOutageOptions();
 seedReleaseControls();
 seedDateOptions();
 initMapInteractions();
+document.querySelectorAll("[data-metric-help]").forEach((button) => {
+  button.addEventListener("click", () => showMetricHelp(button.dataset.metricHelp));
+});
 Object.values(controls).forEach((control) => control.addEventListener("input", render));
 controls.usgsMode.addEventListener("change", refreshUSGSBaseline);
 controls.usgsDate.addEventListener("change", refreshUSGSBaseline);

@@ -130,6 +130,7 @@ h2 {
 .metrics {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 20px 0 16px;
+  order: 0;
 }
 
 .metrics article,
@@ -164,6 +165,45 @@ h2 {
   font-size: 0.72rem;
   line-height: 1;
   color: var(--river);
+  background: var(--river-soft);
+  border-color: transparent;
+}
+
+.help-tip:focus-visible {
+  outline: 2px solid var(--river);
+  outline-offset: 2px;
+}
+
+.metric-info-panel {
+  display: grid;
+  gap: 6px;
+  order: 1;
+  margin: -4px 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fbfcfa;
+  color: #334038;
+}
+
+.metric-info-panel strong {
+  font-size: 0.9rem;
+}
+
+.metric-info-panel code {
+  width: fit-content;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: #edf4ef;
+  color: #234236;
+  font-size: 0.86rem;
+}
+
+.metric-info-panel span {
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .metrics strong {
@@ -182,6 +222,7 @@ h2 {
 .workspace {
   grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.7fr);
   align-items: stretch;
+  order: 2;
 }
 
 .panel {
@@ -486,6 +527,7 @@ dd {
 
 .scenario {
   margin: 16px 0;
+  order: 3;
 }
 
 .research-workbench {

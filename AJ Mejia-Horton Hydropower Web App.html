@@ -30,25 +30,29 @@
     <main>
       <section class="metrics" aria-label="System metrics">
         <article>
-          <span>Total Capacity <button class="help-tip" type="button" aria-label="Total Capacity formula" title="Sum of authorized installed MW across modeled developments; inoperable Great Falls capacity is excluded.">i</button></span>
+          <span>Total Capacity <button class="help-tip" type="button" aria-label="Show Total Capacity equation" data-metric-help="capacity">i</button></span>
           <strong id="metric-capacity">819.1 MW</strong>
           <small>Authorized installed capacity</small>
         </article>
         <article>
-          <span>Simulated Dispatch <button class="help-tip" type="button" aria-label="Simulated Dispatch formula" title="Sum of each station dispatch after waterAvailability, dispatchFactor, release schedule multipliers, reserves, and outages are applied.">i</button></span>
+          <span>Simulated Dispatch <button class="help-tip" type="button" aria-label="Show Simulated Dispatch equation" data-metric-help="dispatch">i</button></span>
           <strong id="metric-generation">0 MW</strong>
           <small id="metric-generation-note">Current scenario output</small>
         </article>
         <article>
-          <span>Usable Storage <button class="help-tip" type="button" aria-label="Usable Storage formula" title="Scenario storage proxy weighted by reservoir scale, basin inflow, demand, and spring stabilization constraints.">i</button></span>
+          <span>Usable Storage <button class="help-tip" type="button" aria-label="Show Usable Storage equation" data-metric-help="storage">i</button></span>
           <strong id="metric-storage">0%</strong>
           <small id="metric-storage-note">Weighted by reservoir scale</small>
         </article>
         <article>
-          <span>Water Value <button class="help-tip" type="button" aria-label="Water Value formula" title="Shadow-price proxy: market price adjusted by scarcity, demand pressure, and current storage percentage.">i</button></span>
+          <span>Water Value <button class="help-tip" type="button" aria-label="Show Water Value equation" data-metric-help="waterValue">i</button></span>
           <strong id="metric-water-value">$0/MWh</strong>
           <small>Scenario shadow price proxy</small>
         </article>
+      </section>
+      <section class="metric-info-panel" id="metric-info-panel" aria-live="polite">
+        <strong>Metric formulas</strong>
+        <span>Click an information icon above to inspect the equation and business logic for that value.</span>
       </section>
 
       <section class="workspace">
@@ -284,7 +288,7 @@
           <a href="https://www.ferc.gov/sites/default/files/2020-05/P-2232-522.pdf" target="_blank" rel="noreferrer"><strong>FERC Order</strong><span>November 25, 2015 Catawba-Wateree new license order, Project No. 2232-522.</span></a>
           <a href="https://www.duke-energy.com/community/lakes/hydroelectric-relicensing/catawba" target="_blank" rel="noreferrer"><strong>Duke Relicensing Portal</strong><span>Project background, license agreement links, and Duke Energy lake resources.</span></a>
           <a href="https://doi.org/10.1007/s10107-003-0454-y" target="_blank" rel="noreferrer"><strong>Two-Stage Robust Optimization</strong><span>Ben-Tal et al. adjustable robust counterpart foundation used by robust MPC literature.</span></a>
-          <a href="https://waterdata.usgs.gov/" target="_blank" rel="noreferrer"><strong>USGS Water Data</strong><span>Historical and current streamflow observations for hydrologic baseline construction.</span></a>
+          <a href="https://api.waterdata.usgs.gov/ogcapi/v0/openapi?f=html#/daily/describeDailyCollection" target="_blank" rel="noreferrer"><strong>USGS Daily Values API</strong><span>OGC daily streamflow observations used for historical hydrologic baseline construction.</span></a>
         </div>
       </section>
     </main>
