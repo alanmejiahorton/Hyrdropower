@@ -12,7 +12,7 @@
         <a href="#model">Model</a>
         <a href="#scenario">Scenario</a>
         <a href="#analytics">Analytics</a>
-        <a href="#research">Research MPC</a>
+        <a href="#graph-maker">Graph Maker</a>
         <a href="#sources">Sources</a>
       </nav>
       <section class="intro" id="model">
@@ -28,33 +28,6 @@
     </header>
 
     <main>
-      <section class="metrics" aria-label="System metrics">
-        <article>
-          <span>Total Capacity <button class="help-tip" type="button" aria-label="Show Total Capacity equation" data-metric-help="capacity">i</button></span>
-          <strong id="metric-capacity">819.1 MW</strong>
-          <small>Authorized installed capacity</small>
-        </article>
-        <article>
-          <span>Simulated Dispatch <button class="help-tip" type="button" aria-label="Show Simulated Dispatch equation" data-metric-help="dispatch">i</button></span>
-          <strong id="metric-generation">0 MW</strong>
-          <small id="metric-generation-note">Current scenario output</small>
-        </article>
-        <article>
-          <span>Usable Storage <button class="help-tip" type="button" aria-label="Show Usable Storage equation" data-metric-help="storage">i</button></span>
-          <strong id="metric-storage">0%</strong>
-          <small id="metric-storage-note">Weighted by reservoir scale</small>
-        </article>
-        <article>
-          <span>Water Value <button class="help-tip" type="button" aria-label="Show Water Value equation" data-metric-help="waterValue">i</button></span>
-          <strong id="metric-water-value">$0/MWh</strong>
-          <small>Scenario shadow price proxy</small>
-        </article>
-      </section>
-      <section class="metric-info-panel" id="metric-info-panel" aria-live="polite">
-        <strong>Metric formulas</strong>
-        <span>Click an information icon above to inspect the equation and business logic for that value.</span>
-      </section>
-
       <section class="workspace">
         <div class="panel topology-panel" aria-label="Interactive cascade topology">
           <div class="panel-heading">
@@ -65,9 +38,7 @@
             <div class="map-tools" aria-label="Map controls">
               <button class="icon-button" id="zoom-out" title="Zoom out" aria-label="Zoom out">-</button>
               <button class="icon-button" id="zoom-in" title="Zoom in" aria-label="Zoom in">+</button>
-              <button class="icon-button" id="reset-view" title="Reset map and selected development" aria-label="Reset map and selected development">
-                <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M20 12a8 8 0 1 1-2.34-5.66L20 8.68V3h-5.68l1.9 1.9A10 10 0 1 0 22 12h-2Z"></path></svg>
-              </button>
+              <button class="icon-button" id="reset-view" title="Reset map and selected development" aria-label="Reset map and selected development">↻</button>
             </div>
           </div>
           <svg id="topology" viewBox="0 0 960 620" role="img" aria-labelledby="topology-title topology-desc">
@@ -94,56 +65,88 @@
         </aside>
       </section>
 
+      <section class="metrics" aria-label="System metrics">
+        <article>
+          <span>Total Capacity <button class="help-tip" type="button" aria-label="Show Total Capacity equation" data-metric-help="capacity">i</button></span>
+          <strong id="metric-capacity">819.1 MW</strong>
+          <small>Authorized installed capacity</small>
+        </article>
+        <article>
+          <span>Simulated Dispatch <button class="help-tip" type="button" aria-label="Show Simulated Dispatch equation" data-metric-help="dispatch">i</button></span>
+          <strong id="metric-generation">0 MW</strong>
+          <small id="metric-generation-note">Current scenario output</small>
+        </article>
+        <article>
+          <span>Usable Storage <button class="help-tip" type="button" aria-label="Show Usable Storage equation" data-metric-help="storage">i</button></span>
+          <strong id="metric-storage">0%</strong>
+          <small id="metric-storage-note">Weighted by reservoir scale</small>
+        </article>
+        <article>
+          <span>Hydropower Value <button class="help-tip" type="button" aria-label="Show Hydropower Value equation" data-metric-help="waterValue">i</button></span>
+          <strong id="metric-water-value">$0/MWh</strong>
+          <small>Dispatch value proxy</small>
+        </article>
+      </section>
+      <section class="metric-info-panel" id="metric-info-panel" aria-live="polite">
+        <strong>Metric formulas</strong>
+        <span>Click an information icon above to inspect the equation and business logic for that value.</span>
+      </section>
+
       <section class="panel scenario" id="scenario">
         <div class="panel-heading">
           <div>
-            <p class="eyebrow">Scenario Builder</p>
+            <p class="eyebrow">Historical Data And Scenario Builder</p>
             <h2>Dispatch And Water Management</h2>
           </div>
           <button id="export-csv">Export CSV</button>
         </div>
         <div class="controls">
           <label class="toggle mode-toggle">
-            <input id="usgs-mode" type="checkbox">
-            <span>Historical USGS streamflow mode</span>
+            <input id="custom-mode" type="checkbox">
+            <span>Custom scenario controls</span>
           </label>
+          <p class="historical-lock-note">Historical mode is the default. Turn on custom controls to adjust inflow, demand, price, reserve, outages, and reservoir release schedules.</p>
           <label for="usgs-date" class="usgs-date-field">
             USGS baseline date
-            <input id="usgs-date" type="date" value="2019-03-07" min="2008-01-01" max="2024-12-31" disabled>
-            <span id="usgs-status">Manual sandbox mode</span>
+            <input id="usgs-date" type="date" value="2019-03-07" min="2008-01-01">
+            <span id="usgs-status">Loading USGS baseline...</span>
           </label>
-          <label for="inflow">
+          <div class="history-playback" aria-label="Historical playback controls">
+            <button id="play-history" type="button">Play Dates</button>
+            <button id="step-history" type="button">Step One Day</button>
+          </div>
+          <label for="inflow" class="manual-control keep-value">
             Basin inflow
             <input id="inflow" type="range" min="35" max="140" value="88">
             <span id="inflow-label">88%</span>
           </label>
-          <label for="demand">
+          <label for="demand" class="manual-control keep-value">
             Peak demand signal
             <input id="demand" type="range" min="20" max="100" value="68">
             <span id="demand-label">68%</span>
           </label>
-          <label for="price">
+          <label for="price" class="manual-control keep-value">
             Market price
             <input id="price" type="range" min="20" max="130" value="72">
             <span id="price-label">$72/MWh</span>
           </label>
-          <label for="reserve">
+          <label for="reserve" class="manual-control custom-only">
             Reserve holdback
             <input id="reserve" type="range" min="0" max="35" value="12">
             <span id="reserve-label">12%</span>
           </label>
-          <label for="outage">
+          <label for="outage" class="manual-control custom-only">
             Forced outage
             <select id="outage">
               <option value="none">None</option>
             </select>
           </label>
-          <label class="toggle">
+          <label class="toggle manual-control custom-only">
             <input id="spring-stabilization" type="checkbox" checked>
             <span>Spring level stabilization</span>
           </label>
         </div>
-        <div class="release-schedule" aria-label="Individual reservoir release schedule controls">
+        <div class="release-schedule manual-control" aria-label="Individual reservoir release schedule controls">
           <div class="release-heading">
             <div>
               <p class="eyebrow">Individual Release Schedules</p>
@@ -153,95 +156,6 @@
             <button id="reset-releases">Reset Releases</button>
           </div>
           <div id="release-controls" class="release-controls"></div>
-        </div>
-      </section>
-
-      <section class="research-workbench" id="research">
-        <div class="panel research-controls-panel">
-          <div class="panel-heading">
-            <div>
-              <p class="eyebrow">Research MPC Workbench</p>
-              <h2>Two-Stage Robust Scheduling Sandbox</h2>
-            </div>
-            <button id="step-mpc">Step Next 24 Hours</button>
-          </div>
-          <div class="research-controls">
-            <label for="mpc-month">
-              Start month
-              <select id="mpc-month">
-                <option value="0">January</option>
-                <option value="1">February</option>
-                <option value="2" selected>March</option>
-                <option value="3">April</option>
-                <option value="4">May</option>
-                <option value="5">June</option>
-                <option value="6">July</option>
-                <option value="7">August</option>
-                <option value="8">September</option>
-                <option value="9">October</option>
-                <option value="10">November</option>
-                <option value="11">December</option>
-              </select>
-            </label>
-            <label for="mpc-date">
-              Start date
-              <select id="mpc-date"></select>
-              <span id="mpc-day-label">Day 66 / Mar 7</span>
-            </label>
-            <label for="inflow-uncertainty">
-              Inflow box
-              <input id="inflow-uncertainty" type="range" min="0" max="50" value="30">
-              <span id="inflow-uncertainty-label">±30%</span>
-            </label>
-            <label for="lmp-uncertainty">
-              LMP box
-              <input id="lmp-uncertainty" type="range" min="0" max="35" value="20">
-              <span id="lmp-uncertainty-label">±20%</span>
-            </label>
-            <label for="forecast-bias">
-              Forecast bias
-              <input id="forecast-bias" type="range" min="80" max="140" value="100">
-              <span id="forecast-bias-label">1.00x</span>
-            </label>
-            <label for="lookahead-window">
-              Lookahead
-              <select id="lookahead-window">
-                <option value="168">1 week</option>
-                <option value="336">2 weeks</option>
-                <option value="672" selected>4 weeks</option>
-              </select>
-            </label>
-            <label for="mpc-mode">
-              Uncertainty mode
-              <select id="mpc-mode">
-                <option value="dynamic" selected>Monthly dynamic</option>
-                <option value="static">Static box</option>
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <div class="research-grid">
-          <article class="panel">
-            <p class="eyebrow">Deterministic vs Robust MPC</p>
-            <h2>Research Scorecard</h2>
-            <div class="scorecard" id="research-scorecard"></div>
-          </article>
-          <article class="panel chart-panel">
-            <p class="eyebrow">Box Uncertainty Overlay</p>
-            <h2>Inflow And LMP Forecast Envelope</h2>
-            <svg id="uncertainty-chart" viewBox="0 0 620 300" role="img" aria-label="Inflow and LMP uncertainty envelope chart"></svg>
-          </article>
-          <article class="panel chart-panel">
-            <p class="eyebrow">True Storage Accounting</p>
-            <h2>Storage And Emergency Recourse</h2>
-            <svg id="storage-chart" viewBox="0 0 620 300" role="img" aria-label="Storage trajectory with shortage and spillage recourse chart"></svg>
-          </article>
-          <article class="panel">
-            <p class="eyebrow">Cascade Propagation</p>
-            <h2>Lake James Shock Travel</h2>
-            <div id="cascade-propagation" class="propagation-list"></div>
-          </article>
         </div>
       </section>
 
@@ -272,23 +186,58 @@
           <div id="compliance-list" class="signal-list"></div>
         </article>
 
-        <article class="panel">
+        <article class="panel spring-info-panel">
+          <p class="eyebrow">Spring Operations</p>
+          <h2>Spring-Level Stabilization</h2>
+          <p>The spring stabilization rule protects recreation, shoreline habitat, fish spawning windows, and downstream minimum-flow reliability by limiting discretionary drawdown at Lake James, Lake Norman, Lake Wylie, and Lake Wateree.</p>
+          <ul>
+            <li>Reduces modeled water availability to hold storage in target bands.</li>
+            <li>Lowers dispatch flexibility during high-value hours when storage needs protection.</li>
+            <li>Raises hydropower value when usable storage becomes operationally scarce.</li>
+          </ul>
+        </article>
+
+        <article class="panel hydropower-value-panel">
           <p class="eyebrow">Medium-Term Planning</p>
           <h2>Hydropower-Value Curve</h2>
-          <p class="chart-copy">This curve is a planning proxy for the shadow price of stored water: as storage gets scarce, each remaining unit of water carries higher expected dispatch value.</p>
-          <svg id="water-value-chart" viewBox="0 0 520 240" role="img" aria-label="Water value response curve"></svg>
+          <p class="chart-copy">This curve is a planning proxy for the dispatch value of stored water: as storage gets scarce, each remaining unit of water carries higher expected hydropower value.</p>
+          <svg id="water-value-chart" viewBox="0 0 960 300" role="img" aria-label="Hydropower value response curve"></svg>
         </article>
+      </section>
+
+      <section class="panel graph-maker historical-only" id="graph-maker">
+        <div class="panel-heading">
+          <div>
+            <p class="eyebrow">Graph Maker</p>
+            <h2>Historical Simulated Dispatch</h2>
+          </div>
+          <span id="graph-maker-status">Historical mode only</span>
+        </div>
+        <div class="graph-controls">
+          <label for="graph-start">
+            Start month
+            <input id="graph-start" type="month" min="2008-01" max="2026-06" value="2019-03">
+          </label>
+          <label for="graph-end">
+            End month
+            <input id="graph-end" type="month" min="2008-01" max="2026-06" value="2019-06">
+          </label>
+          <button id="build-history-graph" type="button">Build Graph</button>
+        </div>
+        <svg id="history-dispatch-chart" viewBox="0 0 960 320" role="img" aria-label="Historical simulated dispatch in megawatts"></svg>
       </section>
 
       <section class="panel sources" id="sources">
         <p class="eyebrow">Model Notes</p>
         <h2>Sources And Assumptions</h2>
-        <p>The model uses the user-provided outline and data PDFs for feature scope and storage estimates, plus official hydropower, streamflow, and robust-optimization references for context.</p>
+        <p>The model uses the user-provided outline and data PDFs for feature scope and storage estimates, plus official hydropower and streamflow references for context.</p>
         <div class="source-grid">
           <a href="https://www.ferc.gov/sites/default/files/2020-05/P-2232-522.pdf" target="_blank" rel="noreferrer"><strong>FERC Order</strong><span>November 25, 2015 Catawba-Wateree new license order, Project No. 2232-522.</span></a>
           <a href="https://www.duke-energy.com/community/lakes/hydroelectric-relicensing/catawba" target="_blank" rel="noreferrer"><strong>Duke Relicensing Portal</strong><span>Project background, license agreement links, and Duke Energy lake resources.</span></a>
-          <a href="https://doi.org/10.1007/s10107-003-0454-y" target="_blank" rel="noreferrer"><strong>Two-Stage Robust Optimization</strong><span>Ben-Tal et al. adjustable robust counterpart foundation used by robust MPC literature.</span></a>
           <a href="https://api.waterdata.usgs.gov/ogcapi/v0/openapi?f=html#/daily/describeDailyCollection" target="_blank" rel="noreferrer"><strong>USGS Daily Values API</strong><span>OGC daily streamflow observations used for historical hydrologic baseline construction.</span></a>
+          <a href="https://waterdata.usgs.gov/monitoring-location/USGS-02138520/#dataTypeId=continuous-00060-0&period=P7D&showFieldMeasurements=true&showMedian=true" target="_blank" rel="noreferrer"><strong>USGS-02138520</strong><span>Catawba River below Lake James release/discharge reference.</span></a>
+          <a href="https://waterdata.usgs.gov/monitoring-location/USGS-02145910/#dataTypeId=continuous-00060-0&period=P7D&showFieldMeasurements=true&showMedian=true" target="_blank" rel="noreferrer"><strong>USGS-02145910</strong><span>Catawba River below Lake Wylie release/discharge reference.</span></a>
+          <a href="https://waterdata.usgs.gov/monitoring-location/USGS-02147801/#dataTypeId=continuous-00060-678851774&period=P7D&showFieldMeasurements=true&showMedian=true" target="_blank" rel="noreferrer"><strong>USGS-02147801</strong><span>Lake Wateree tailrace release/discharge reference.</span></a>
         </div>
       </section>
     </main>

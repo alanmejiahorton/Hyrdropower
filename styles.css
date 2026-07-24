@@ -98,8 +98,8 @@ h2 {
 }
 
 h1 {
-  font-size: clamp(2.2rem, 6vw, 5.9rem);
-  max-width: 980px;
+  font-size: clamp(2.15rem, 4.8vw, 4.35rem);
+  max-width: 760px;
 }
 
 h2 {
@@ -130,7 +130,7 @@ h2 {
 .metrics {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   margin: 20px 0 16px;
-  order: 0;
+  order: 3;
 }
 
 .metrics article,
@@ -177,7 +177,7 @@ h2 {
 .metric-info-panel {
   display: grid;
   gap: 6px;
-  order: 1;
+  order: 4;
   margin: -4px 0 16px;
   padding: 12px 14px;
   border: 1px solid var(--line);
@@ -262,7 +262,8 @@ select:hover {
   width: 38px;
   height: 38px;
   padding: 0;
-  font-size: 1.1rem;
+  font-size: 1.2rem;
+  line-height: 1;
 }
 
 .icon-button svg {
@@ -283,7 +284,7 @@ select:hover {
   display: block;
   border: 1px solid #e4e8e3;
   border-radius: 8px;
-  background: #d3d5cf;
+  background: #d9ddd6;
   cursor: grab;
   touch-action: none;
 }
@@ -293,17 +294,23 @@ select:hover {
 }
 
 .basin-shape {
-  fill: #aeb4ad;
-  filter: url(#relief);
+  fill: rgba(116, 127, 118, 0.18);
   stroke: #4e5751;
   stroke-width: 2;
-  opacity: 0.9;
+  opacity: 0.85;
 }
 
-.state-boundary {
-  fill: none;
+.state-shape {
   stroke: rgba(67, 73, 68, 0.42);
-  stroke-width: 1.4;
+  stroke-width: 1.6;
+}
+
+.nc-shape {
+  fill: #c7cec5;
+}
+
+.sc-shape {
+  fill: #c1cac2;
 }
 
 .map-caption {
@@ -527,7 +534,41 @@ dd {
 
 .scenario {
   margin: 16px 0;
-  order: 3;
+  order: 5;
+}
+
+.scenario.historical-active .manual-control input,
+.scenario.historical-active .manual-control select,
+.scenario.historical-active .custom-only,
+.scenario.historical-active .release-schedule {
+  display: none;
+}
+
+.scenario.custom-active .history-playback {
+  display: none;
+}
+
+.history-playback,
+.graph-controls {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.graph-controls label {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.graph-controls input {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 7px 9px;
 }
 
 .research-workbench {
@@ -650,6 +691,41 @@ dd {
   color: var(--ink);
 }
 
+.historical-lock-note {
+  align-self: stretch;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid #dbe4dd;
+  border-radius: 6px;
+  background: #f4f8f5;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+input:disabled,
+select:disabled,
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.scenario.historical-active .controls label:not(.mode-toggle):not(.usgs-date-field),
+.scenario.historical-active .release-schedule {
+  opacity: 0.72;
+}
+
+.scenario.historical-active .release-schedule::after {
+  content: "Driven by observed USGS release gages";
+  display: block;
+  margin-top: 10px;
+  color: var(--river);
+  font-size: 0.76rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 input[type="range"] {
   width: 100%;
   accent-color: var(--river);
@@ -760,11 +836,31 @@ h3 {
 .analytics-grid {
   grid-template-columns: minmax(0, 1.25fr) minmax(260px, 0.7fr);
   margin-bottom: 16px;
-  order: 4;
+  order: 6;
 }
 
 .analytics-grid article:first-child {
   grid-row: span 2;
+}
+
+.hydropower-value-panel,
+.graph-maker {
+  grid-column: 1 / -1;
+}
+
+.spring-info-panel ul {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+}
+
+.graph-maker {
+  margin-bottom: 16px;
+  order: 7;
+}
+
+.is-hidden {
+  display: none !important;
 }
 
 .table-wrap {
@@ -838,6 +934,13 @@ th {
   width: 100%;
   max-width: 100%;
   display: block;
+  overflow: visible;
+}
+
+#history-dispatch-chart {
+  width: 100%;
+  display: block;
+  margin-top: 14px;
   overflow: visible;
 }
 
@@ -931,7 +1034,7 @@ th {
 
 .sources {
   margin-bottom: 36px;
-  order: 6;
+  order: 8;
 }
 
 .sources ul {

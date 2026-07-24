@@ -214,7 +214,7 @@ const releaseMultipliers = Object.fromEntries(developments.map((d) => [d.id, 100
 const mapState = { scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0, originX: 0, originY: 0 };
 
 const controls = {
-  usgsMode: document.querySelector("#usgs-mode"),
+  customMode: document.querySelector("#custom-mode"),
   usgsDate: document.querySelector("#usgs-date"),
   inflow: document.querySelector("#inflow"),
   demand: document.querySelector("#demand"),
@@ -224,14 +224,14 @@ const controls = {
   spring: document.querySelector("#spring-stabilization")
 };
 
-const researchControls = {
-  month: document.querySelector("#mpc-month"),
-  date: document.querySelector("#mpc-date"),
-  lookahead: document.querySelector("#lookahead-window"),
-  inflowUncertainty: document.querySelector("#inflow-uncertainty"),
-  lmpUncertainty: document.querySelector("#lmp-uncertainty"),
-  forecastBias: document.querySelector("#forecast-bias"),
-  mode: document.querySelector("#mpc-mode")
+const graphControls = {
+  start: document.querySelector("#graph-start"),
+  end: document.querySelector("#graph-end"),
+  build: document.querySelector("#build-history-graph"),
+  status: document.querySelector("#graph-maker-status"),
+  chart: document.querySelector("#history-dispatch-chart"),
+  play: document.querySelector("#play-history"),
+  step: document.querySelector("#step-history")
 };
 
 const selected = {
@@ -239,6 +239,8 @@ const selected = {
 };
 
 let usgsBaseline = null;
+let playbackTimer = null;
+const historyGraphCache = new Map();
 
 const statusDefinitions = {
   Normal: "Operating within modeled dispatch, release, storage, and compliance guardrails.",
@@ -255,23 +257,23 @@ const signalPriority = { alert: 0, warning: 1, normal: 2 };
 const metricHelp = {
   capacity: {
     title: "Total Capacity",
-    equation: "Total capacity = sum(authorized MW for modeled developments)",
+    equation: "Total capacity (MW) = sum(authorized capacity MW for modeled developments)",
     description: "This is the licensed installed capacity basis used by the app. The inoperable 24 MW Great Falls capacity is excluded, matching the project capacity treatment in the FERC order."
   },
   dispatch: {
     title: "Simulated Dispatch",
-    equation: "Dispatch = sum(min(capacity, capacity x dispatchFactor x localFlow x scheduleEffect))",
-    description: "Each station output is shaped by basin water availability, demand, market price, reserve holdback, outages, and the individual release multiplier."
+    equation: "Simulated dispatch (MW) = sum(min(capacity MW, capacity MW x weightedDispatch x localFlow x storageDispatch))",
+    description: "Historical mode uses basin release gages and storage-weighted peaking logic so large reservoirs are not throttled by headwater flow alone. Manual mode still applies individual release schedules."
   },
   storage: {
     title: "Usable Storage",
-    equation: "Storage % = clamp(47 + 0.43 x inflow - 0.12 x demand - springPenalty, 31, 99)",
+    equation: "Usable storage (%) = clamp(47 + 0.43 x inflow % - 0.12 x demand % - springPenalty %, 31, 99)",
     description: "This planning proxy estimates system storage pressure from hydrologic supply, demand draw, and spring stabilization constraints, then weights the acre-foot display by total reservoir scale."
   },
   waterValue: {
-    title: "Water Value",
-    equation: "Water value = max(8, price x (1.35 - storage% / 130) + 0.12 x demand + droughtPremium)",
-    description: "This approximates the shadow price of stored water. Scarcer storage and higher demand raise the value of holding or carefully dispatching water."
+    title: "Hydropower Value",
+    equation: "Hydropower value ($/MWh) = max(8, market price $/MWh x (1.35 - storage% / 130) + 0.12 x demand % + droughtPremium $/MWh)",
+    description: "This approximates the dispatch value of stored water. Scarcer storage and higher demand raise the value of holding or carefully dispatching water."
   }
 };
 
@@ -280,6 +282,36 @@ function fmt(value, digits = 0) {
     maximumFractionDigits: digits,
     minimumFractionDigits: digits
   });
+}
+
+function isoToday() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function addDays(date, days) {
+  const next = new Date(`${date}T00:00:00Z`);
+  next.setUTCDate(next.getUTCDate() + days);
+  return next.toISOString().slice(0, 10);
+}
+
+function clampDate(date, min, max) {
+  if (date < min) return min;
+  if (date > max) return max;
+  return date;
+}
+
+function monthKey(date) {
+  return date.slice(0, 7);
+}
+
+function monthStart(key) {
+  return `${key}-01`;
+}
+
+function addMonths(key, months) {
+  const date = new Date(`${key}-01T00:00:00Z`);
+  date.setUTCMonth(date.getUTCMonth() + months);
+  return date.toISOString().slice(0, 7);
 }
 
 function optionLabel(d) {
@@ -322,22 +354,25 @@ function seedReleaseControls() {
 }
 
 function scenario() {
-  const inflow = controls.usgsMode.checked && usgsBaseline ? usgsBaseline.inflowPercent : Number(controls.inflow.value);
-  const demand = Number(controls.demand.value);
-  const price = controls.usgsMode.checked && usgsBaseline ? usgsBaseline.price : Number(controls.price.value);
-  const reserve = Number(controls.reserve.value);
-  const spring = controls.spring.checked;
+  const historical = !controls.customMode.checked && usgsBaseline;
+  const inflow = historical ? usgsBaseline.inflowPercent : Number(controls.inflow.value);
+  const demand = historical ? usgsBaseline.demand : Number(controls.demand.value);
+  const price = historical ? usgsBaseline.price : Number(controls.price.value);
+  const reserve = historical ? usgsBaseline.reserve : Number(controls.reserve.value);
+  const spring = historical ? usgsBaseline.spring : controls.spring.checked;
   const droughtPenalty = inflow < 55 ? (55 - inflow) * 0.006 : 0;
   const wetSpillPenalty = inflow > 112 ? (inflow - 112) * 0.005 : 0;
   const stabilizationPenalty = spring ? 0.07 : 0;
   const reservePenalty = reserve / 100;
-  const waterAvailability = Math.max(0.18, Math.min(1.08, inflow / 100 - droughtPenalty - stabilizationPenalty));
-  const demandPull = 0.35 + demand / 118 + price / 360;
-  const dispatchFactor = Math.max(0.04, Math.min(1, waterAvailability * demandPull * (1 - reservePenalty) - wetSpillPenalty));
+  const waterAvailability = Math.max(0.2, Math.min(1.45, inflow / 100 - droughtPenalty - stabilizationPenalty));
+  const demandPull = Math.max(0.2, Math.min(1, demand / 100 + price / 420));
+  const baseDispatch = waterAvailability * 0.6 + demandPull * 0.4;
+  const dispatchFactor = Math.max(0.15, Math.min(1, baseDispatch - reservePenalty - wetSpillPenalty * 0.35));
   const storagePercent = Math.max(31, Math.min(99, 47 + inflow * 0.43 - demand * 0.12 - (spring ? 3 : 0)));
   const waterValue = Math.max(8, price * (1.35 - storagePercent / 130) + demand * 0.12 + Math.max(0, 70 - inflow) * 0.7);
 
   return {
+    historical,
     inflow,
     demand,
     price,
@@ -347,7 +382,38 @@ function scenario() {
     dispatchFactor,
     storagePercent,
     waterValue,
-    outage: controls.outage.value
+    outage: historical ? "none" : controls.outage.value
+  };
+}
+
+function scenarioFromBaseline(baseline) {
+  const inflow = baseline.inflowPercent;
+  const demand = baseline.demand;
+  const price = baseline.price;
+  const reserve = baseline.reserve;
+  const spring = baseline.spring;
+  const droughtPenalty = inflow < 55 ? (55 - inflow) * 0.006 : 0;
+  const wetSpillPenalty = inflow > 112 ? (inflow - 112) * 0.005 : 0;
+  const stabilizationPenalty = spring ? 0.07 : 0;
+  const reservePenalty = reserve / 100;
+  const waterAvailability = Math.max(0.2, Math.min(1.45, inflow / 100 - droughtPenalty - stabilizationPenalty));
+  const demandPull = Math.max(0.2, Math.min(1, demand / 100 + price / 420));
+  const baseDispatch = waterAvailability * 0.6 + demandPull * 0.4;
+  const dispatchFactor = Math.max(0.15, Math.min(1, baseDispatch - reservePenalty - wetSpillPenalty * 0.35));
+  const storagePercent = Math.max(31, Math.min(99, 47 + inflow * 0.43 - demand * 0.12 - (spring ? 3 : 0)));
+  const waterValue = Math.max(8, price * (1.35 - storagePercent / 130) + demand * 0.12 + Math.max(0, 70 - inflow) * 0.7);
+  return {
+    historical: true,
+    inflow,
+    demand,
+    price,
+    reserve,
+    spring,
+    waterAvailability,
+    dispatchFactor,
+    storagePercent,
+    waterValue,
+    outage: "none"
   };
 }
 
@@ -355,11 +421,13 @@ function stationRows(state) {
   let availableCapacity = 0;
   const rows = developments.map((d, index) => {
     const out = state.outage === d.id;
-    const releaseMultiplier = releaseMultipliers[d.id] / 100;
+    const releaseMultiplier = state.historical ? 1 : releaseMultipliers[d.id] / 100;
     const upstreamStorageWeight = d.storage / totalStorage;
-    const localFlow = Math.max(0.15, state.waterAvailability + upstreamStorageWeight * 0.7 - index * 0.008);
+    const storagePeakingStations = ["bridgewater", "cowans", "wylie", "wateree"];
+    const storageDispatch = storagePeakingStations.includes(d.id) && state.storagePercent > 38 ? 0.98 : 0.82;
+    const localFlow = Math.max(0.24, Math.min(1.2, state.waterAvailability * 0.72 + upstreamStorageWeight * 1.35 - index * 0.004));
     const scheduleEffect = Math.max(0.5, Math.min(1.35, releaseMultiplier));
-    const dispatch = out ? 0 : Math.min(d.capacity, d.capacity * state.dispatchFactor * localFlow * (0.72 + scheduleEffect * 0.28));
+    const dispatch = out ? 0 : Math.min(d.capacity, d.capacity * state.dispatchFactor * localFlow * storageDispatch * (0.72 + scheduleEffect * 0.28));
     const baseRelease = d.minFlow + dispatch * (index < 5 ? 20 : 14) + Math.max(0, state.inflow - 100) * 8;
     const release = Math.round(Math.max(d.minFlow * 0.85, baseRelease * releaseMultiplier));
     availableCapacity += out ? 0 : d.capacity;
@@ -378,6 +446,24 @@ function stationRows(state) {
   return { rows, availableCapacity };
 }
 
+function reservoirPath(d) {
+  const rx = d.reservoirWidth;
+  const ry = d.reservoirHeight;
+  const points = [
+    [-rx, -ry * 0.12],
+    [-rx * 0.64, -ry * 0.72],
+    [-rx * 0.18, -ry * 0.48],
+    [rx * 0.16, -ry],
+    [rx * 0.52, -ry * 0.44],
+    [rx, -ry * 0.16],
+    [rx * 0.58, ry * 0.34],
+    [rx * 0.18, ry],
+    [-rx * 0.24, ry * 0.52],
+    [-rx * 0.66, ry * 0.78]
+  ];
+  return points.map(([x, y], index) => `${index ? "L" : "M"} ${(d.x + x).toFixed(1)} ${(d.y + y).toFixed(1)}`).join(" ") + " Z";
+}
+
 function drawTopology(rows) {
   const svg = document.querySelector("#topology");
   svg.innerHTML = "";
@@ -385,18 +471,6 @@ function drawTopology(rows) {
   const positions = rows.map((d) => ({ ...d, ...mapPositions[d.id] }));
 
   const ns = "http://www.w3.org/2000/svg";
-  const defs = document.createElementNS(ns, "defs");
-  defs.innerHTML = `
-    <filter id="relief">
-      <feTurbulence type="fractalNoise" baseFrequency="0.012" numOctaves="4" seed="8" result="noise"></feTurbulence>
-      <feDiffuseLighting in="noise" lighting-color="#ffffff" surfaceScale="2.6">
-        <feDistantLight azimuth="315" elevation="42"></feDistantLight>
-      </feDiffuseLighting>
-      <feComposite operator="arithmetic" k1="0.25" k2="0.65" k3="0.25" k4="0"></feComposite>
-    </filter>
-  `;
-  svg.appendChild(defs);
-
   const viewport = document.createElementNS(ns, "g");
   viewport.setAttribute("class", "map-viewport");
   viewport.setAttribute("transform", `translate(${mapState.x} ${mapState.y}) scale(${mapState.scale})`);
@@ -406,15 +480,16 @@ function drawTopology(rows) {
   group.setAttribute("transform", "translate(78 -88)");
   viewport.appendChild(group);
 
-  const basin = document.createElementNS(ns, "path");
-  basin.setAttribute("class", "basin-shape");
-  basin.setAttribute("d", "M105 118 L155 80 L238 50 L342 72 L460 88 L565 122 L596 205 L690 250 L674 360 L713 438 L675 550 L716 640 L704 738 L778 810 L742 900 L635 918 L576 820 L546 702 L504 590 L516 496 L478 382 L410 318 L318 292 L234 260 L150 252 L88 205 Z");
-  group.appendChild(basin);
-
-  const stateLine = document.createElementNS(ns, "path");
-  stateLine.setAttribute("class", "state-boundary");
-  stateLine.setAttribute("d", "M72 430 C210 421, 354 424, 510 444 C590 454, 676 452, 798 430");
-  group.appendChild(stateLine);
+  [
+    { cls: "state-shape nc-shape", d: "M42 322 L88 274 L132 225 L166 170 L230 112 L326 94 L462 132 L584 178 L722 238 L806 304 L764 370 L664 410 L520 438 L352 424 L214 392 L96 360 Z" },
+    { cls: "state-shape sc-shape", d: "M104 360 L222 392 L356 424 L522 438 L662 412 L762 372 L806 430 L776 520 L728 630 L746 742 L822 824 L718 926 L596 900 L518 792 L458 670 L364 570 L244 486 L118 438 Z" },
+    { cls: "basin-shape", d: "M105 118 L155 80 L238 50 L342 72 L460 88 L565 122 L596 205 L690 250 L674 360 L713 438 L675 550 L716 640 L704 738 L778 810 L742 900 L635 918 L576 820 L546 702 L504 590 L516 496 L478 382 L410 318 L318 292 L234 260 L150 252 L88 205 Z" }
+  ].forEach((shape) => {
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("class", shape.cls);
+    path.setAttribute("d", shape.d);
+    group.appendChild(path);
+  });
 
   [
     { text: "North Carolina", x: 120, y: 395 },
@@ -447,12 +522,9 @@ function drawTopology(rows) {
   });
 
   positions.forEach((d) => {
-    const reservoir = document.createElementNS(ns, "ellipse");
+    const reservoir = document.createElementNS(ns, "path");
     reservoir.setAttribute("class", "reservoir-shape");
-    reservoir.setAttribute("cx", d.x);
-    reservoir.setAttribute("cy", d.y);
-    reservoir.setAttribute("rx", d.reservoirWidth);
-    reservoir.setAttribute("ry", d.reservoirHeight);
+    reservoir.setAttribute("d", reservoirPath(d));
     reservoir.setAttribute("transform", `rotate(${d.angle} ${d.x} ${d.y})`);
     reservoir.addEventListener("click", () => selectDevelopment(d.id));
     group.appendChild(reservoir);
@@ -534,7 +606,7 @@ function updateDetails(rows) {
 
   if (!target) {
     detailName.textContent = "System Overview";
-    detailSummary.textContent = "The cascade is modeled as coordinated storage and releases: upstream water availability shapes downstream generation, minimum flows, spillage risk, and water value.";
+    detailSummary.textContent = "The cascade is modeled as coordinated storage and releases: upstream water availability shapes downstream generation, minimum flows, spillage risk, and hydropower value.";
     detailReservoir.textContent = "11 reservoirs";
     detailCapacity.textContent = `${fmt(totalCapacity, 1)} MW`;
     detailStorage.textContent = `${fmt(totalStorage)} acre-ft scale`;
@@ -543,7 +615,7 @@ function updateDetails(rows) {
     [
       "Lake Norman dominates storage scale and provides the main downstream safety buffer.",
       "Hydropower dispatch is flexible, so reserve holdback can reduce immediate generation while preserving ancillary-service capability.",
-      "Drought scenarios raise water value and tighten minimum-flow watch conditions."
+      "Drought scenarios raise hydropower value and tighten minimum-flow watch conditions."
     ].forEach(addNote);
     return;
   }
@@ -608,12 +680,37 @@ function showMetricHelp(key) {
   panel.innerHTML = `<strong>${info.title}</strong><code>${info.equation}</code><span>${info.description}</span>`;
 }
 
+function setHistoricalControlState() {
+  const historical = !controls.customMode.checked;
+  controls.usgsDate.disabled = !historical;
+  [controls.inflow, controls.demand, controls.price, controls.reserve, controls.outage, controls.spring].forEach((control) => {
+    control.disabled = historical;
+  });
+  document.querySelectorAll("#release-controls input").forEach((input) => {
+    input.disabled = historical;
+  });
+  document.querySelector("#reset-releases").disabled = historical;
+  document.querySelector(".scenario")?.classList.toggle("historical-active", historical);
+  document.querySelector(".scenario")?.classList.toggle("custom-active", !historical);
+  document.querySelector(".release-schedule")?.setAttribute("aria-disabled", String(historical));
+  document.querySelector(".graph-maker")?.classList.toggle("is-hidden", !historical);
+  graphControls.play.disabled = !historical;
+  graphControls.step.disabled = !historical;
+  graphControls.start.disabled = !historical;
+  graphControls.end.disabled = !historical;
+  graphControls.build.disabled = !historical;
+  if (!historical) stopHistoryPlayback();
+}
+
 function updateReleaseLabels(rows) {
   rows.forEach((d) => {
     const input = document.querySelector(`#release-${d.id}`);
     const label = document.querySelector(`#release-label-${d.id}`);
     if (input && Number(input.value) !== releaseMultipliers[d.id]) input.value = releaseMultipliers[d.id];
-    if (label) label.textContent = `${fmt(releaseMultipliers[d.id])}% / ${fmt(d.release)} cfs`;
+    if (label) {
+      const schedule = !controls.customMode.checked ? "USGS" : `${fmt(releaseMultipliers[d.id])}%`;
+      label.textContent = `${schedule} / ${fmt(d.release)} cfs`;
+    }
   });
 }
 
@@ -678,19 +775,19 @@ function drawWaterValueChart(state) {
   const svg = document.querySelector("#water-value-chart");
   svg.innerHTML = "";
   const ns = "http://www.w3.org/2000/svg";
-  const width = 520;
-  const height = 240;
-  const pad = 44;
-  const points = Array.from({ length: 13 }, (_, i) => {
-    const storage = 35 + i * 5;
+  const width = 960;
+  const height = 300;
+  const pad = 56;
+  const points = Array.from({ length: 21 }, (_, i) => {
+    const storage = i * 5;
     const value = Math.max(8, state.price * (1.35 - storage / 130) + state.demand * 0.12 + Math.max(0, 70 - state.inflow) * 0.7);
     return { storage, value };
   });
   const maxValue = Math.max(...points.map((p) => p.value)) * 1.08;
-  const x = (storage) => pad + ((storage - 35) / 60) * (width - pad * 2);
+  const x = (storage) => pad + (storage / 100) * (width - pad * 2);
   const y = (value) => height - pad - (value / maxValue) * (height - pad * 2);
   const line = points.map((p, i) => `${i ? "L" : "M"} ${x(p.storage)} ${y(p.value)}`).join(" ");
-  const area = `${line} L ${x(95)} ${height - pad} L ${x(35)} ${height - pad} Z`;
+  const area = `${line} L ${x(100)} ${height - pad} L ${x(0)} ${height - pad} Z`;
 
   const axisX = document.createElementNS(ns, "line");
   axisX.setAttribute("class", "chart-axis");
@@ -708,7 +805,7 @@ function drawWaterValueChart(state) {
   axisY.setAttribute("y2", height - pad);
   svg.appendChild(axisY);
 
-  [35, 50, 65, 80, 95].forEach((tick) => {
+  [0, 20, 40, 60, 80, 100].forEach((tick) => {
     const tickLine = document.createElementNS(ns, "line");
     tickLine.setAttribute("class", "chart-tick");
     tickLine.setAttribute("x1", x(tick));
@@ -763,8 +860,8 @@ function drawWaterValueChart(state) {
   svg.appendChild(dot);
 
   [
-    { text: "Storage inventory (% usable)", x: width / 2 - 68, y: height - 5 },
-    { text: "Water value ($/MWh)", x: 10, y: 18 },
+    { text: "Storage inventory (% usable)", x: width / 2 - 78, y: height - 8 },
+    { text: "Hydropower value ($/MWh)", x: 10, y: 22 },
     { text: `$${fmt(state.waterValue)}/MWh`, x: x(current.storage) + 12, y: y(current.value) - 10 }
   ].forEach((label) => {
     const text = document.createElementNS(ns, "text");
@@ -774,6 +871,119 @@ function drawWaterValueChart(state) {
     text.textContent = label.text;
     svg.appendChild(text);
   });
+}
+
+function stopHistoryPlayback() {
+  if (playbackTimer) {
+    clearInterval(playbackTimer);
+    playbackTimer = null;
+  }
+  if (graphControls.play) graphControls.play.textContent = "Play Dates";
+}
+
+async function stepHistoryDate() {
+  if (controls.customMode.checked) return;
+  const min = controls.usgsDate.min || "2008-01-01";
+  const max = controls.usgsDate.max || isoToday();
+  const next = addDays(controls.usgsDate.value || min, 1);
+  controls.usgsDate.value = clampDate(next > max ? min : next, min, max);
+  await refreshUSGSBaseline();
+}
+
+function toggleHistoryPlayback() {
+  if (playbackTimer) {
+    stopHistoryPlayback();
+    return;
+  }
+  graphControls.play.textContent = "Pause Dates";
+  playbackTimer = setInterval(() => {
+    stepHistoryDate();
+  }, 1100);
+}
+
+async function loadMonthlyBaseline(month) {
+  const maxDate = controls.usgsDate.max || isoToday();
+  const date = clampDate(monthStart(month), "2008-01-01", maxDate);
+  if (!historyGraphCache.has(date)) {
+    historyGraphCache.set(date, window.usgsData.loadUSGSBaseline(date));
+  }
+  return historyGraphCache.get(date);
+}
+
+function normalizeGraphMonths() {
+  const min = "2008-01";
+  const max = "2026-06";
+  let start = graphControls.start.value || "2019-03";
+  let end = graphControls.end.value || start;
+  if (start < min) start = min;
+  if (end > max) end = max;
+  if (start > end) [start, end] = [end, start];
+  graphControls.start.value = start;
+  graphControls.end.value = end;
+  return { start, end };
+}
+
+function drawHistoryDispatchChart(points) {
+  const svg = graphControls.chart;
+  svg.innerHTML = "";
+  const width = 960;
+  const height = 320;
+  const pad = 58;
+  if (!points.length) return;
+  const maxDispatch = Math.max(1, Math.max(...points.map((p) => p.dispatch)) * 1.12);
+  const x = (index) => pad + (points.length === 1 ? 0.5 : index / (points.length - 1)) * (width - pad * 2);
+  const y = (dispatch) => height - pad - (dispatch / maxDispatch) * (height - pad * 2);
+  svg.appendChild(svgEl("line", { class: "chart-axis", x1: pad, y1: height - pad, x2: width - pad, y2: height - pad }));
+  svg.appendChild(svgEl("line", { class: "chart-axis", x1: pad, y1: pad, x2: pad, y2: height - pad }));
+  [0, 0.25, 0.5, 0.75, 1].forEach((ratio) => {
+    const value = maxDispatch * ratio;
+    const tickY = y(value);
+    svg.appendChild(svgEl("line", { class: "chart-tick", x1: pad - 6, y1: tickY, x2: pad, y2: tickY }));
+    const label = svgEl("text", { class: "chart-label", x: 8, y: tickY + 4 });
+    label.textContent = `${fmt(value)} MW`;
+    svg.appendChild(label);
+  });
+  const tickIndexes = Array.from(new Set([0, Math.floor(points.length / 3), Math.floor((points.length * 2) / 3), points.length - 1]));
+  tickIndexes.forEach((index) => {
+    const tickX = x(index);
+    svg.appendChild(svgEl("line", { class: "chart-tick", x1: tickX, y1: height - pad, x2: tickX, y2: height - pad + 6 }));
+    const label = svgEl("text", { class: "chart-label", x: tickX - 22, y: height - pad + 22 });
+    label.textContent = points[index].month;
+    svg.appendChild(label);
+  });
+  const line = points.map((p, i) => `${i ? "L" : "M"} ${x(i)} ${y(p.dispatch)}`).join(" ");
+  const area = `${line} L ${x(points.length - 1)} ${height - pad} L ${x(0)} ${height - pad} Z`;
+  svg.appendChild(svgEl("path", { class: "chart-area", d: area }));
+  svg.appendChild(svgEl("path", { class: "chart-line", d: line }));
+  [
+    { text: "Simulated dispatch (MW)", x: 8, y: 24 },
+    { text: "Historical month", x: width / 2 - 45, y: height - 10 }
+  ].forEach((label) => {
+    const text = svgEl("text", { class: "chart-label", x: label.x, y: label.y });
+    text.textContent = label.text;
+    svg.appendChild(text);
+  });
+}
+
+async function buildHistoryGraph() {
+  if (controls.customMode.checked) return;
+  const { start, end } = normalizeGraphMonths();
+  const months = [];
+  for (let month = start; month <= end; month = addMonths(month, 1)) {
+    months.push(month);
+    if (month === end) break;
+  }
+  graphControls.status.textContent = `Loading ${months.length} month${months.length === 1 ? "" : "s"}...`;
+  const points = [];
+  for (const month of months) {
+    const baseline = await loadMonthlyBaseline(month);
+    const state = scenarioFromBaseline(baseline);
+    const dispatch = stationRows(state).rows.reduce((sum, d) => sum + d.dispatch, 0);
+    points.push({ month, dispatch, baseline });
+    graphControls.status.textContent = `Loaded ${points.length}/${months.length}`;
+  }
+  drawHistoryDispatchChart(points);
+  graphControls.status.textContent = `${start} to ${end}: simulated dispatch in MW`;
 }
 
 const monthLengths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -1099,20 +1309,18 @@ function updateLabels(state) {
   document.querySelector("#demand-label").textContent = `${state.demand}%`;
   document.querySelector("#price-label").textContent = `$${state.price}/MWh`;
   document.querySelector("#reserve-label").textContent = `${state.reserve}%`;
-  if (controls.usgsMode.checked && usgsBaseline) {
+  if (!controls.customMode.checked && usgsBaseline) {
     document.querySelector("#usgs-status").textContent = `Loaded ${usgsBaseline.sourceDate}: ${fmt(usgsBaseline.totalCfs)} cfs total. ${usgsBaseline.note}`;
-  } else if (controls.usgsMode.checked) {
+  } else if (!controls.customMode.checked) {
     document.querySelector("#usgs-status").textContent = "Loading USGS baseline...";
   } else {
-    document.querySelector("#usgs-status").textContent = "Manual sandbox mode";
+    document.querySelector("#usgs-status").textContent = "Custom scenario mode";
   }
 }
 
 async function refreshUSGSBaseline() {
-  controls.usgsDate.disabled = !controls.usgsMode.checked;
-  controls.inflow.disabled = controls.usgsMode.checked;
-  controls.price.disabled = controls.usgsMode.checked;
-  if (!controls.usgsMode.checked) {
+  setHistoricalControlState();
+  if (controls.customMode.checked) {
     usgsBaseline = null;
     render();
     return;
@@ -1128,6 +1336,7 @@ async function refreshUSGSBaseline() {
 }
 
 function render() {
+  setHistoricalControlState();
   const state = scenario();
   const { rows, availableCapacity } = stationRows(state);
   const totalGeneration = rows.reduce((sum, d) => sum + d.dispatch, 0);
@@ -1144,7 +1353,6 @@ function render() {
   renderDispatch(rows);
   renderCompliance(state, rows, availableCapacity);
   drawWaterValueChart(state);
-  renderResearch();
 }
 
 function selectDevelopment(id, focusMap = false) {
@@ -1183,23 +1391,16 @@ function exportCsv() {
 
 seedOutageOptions();
 seedReleaseControls();
-seedDateOptions();
 initMapInteractions();
+controls.usgsDate.max = isoToday();
+controls.usgsDate.value = clampDate(controls.usgsDate.value, controls.usgsDate.min, controls.usgsDate.max);
 document.querySelectorAll("[data-metric-help]").forEach((button) => {
   button.addEventListener("click", () => showMetricHelp(button.dataset.metricHelp));
 });
 Object.values(controls).forEach((control) => control.addEventListener("input", render));
-controls.usgsMode.addEventListener("change", refreshUSGSBaseline);
+controls.customMode.addEventListener("change", refreshUSGSBaseline);
 controls.usgsDate.addEventListener("change", refreshUSGSBaseline);
-Object.values(researchControls).forEach((control) => control.addEventListener("input", render));
 controls.outage.addEventListener("change", render);
-researchControls.month.addEventListener("change", () => {
-  seedDateOptions();
-  render();
-});
-researchControls.date.addEventListener("change", render);
-researchControls.lookahead.addEventListener("change", render);
-researchControls.mode.addEventListener("change", render);
 document.querySelector("#reset-view").addEventListener("click", () => {
   selected.id = null;
   mapState.scale = 1;
@@ -1215,14 +1416,12 @@ document.querySelector("#reset-releases").addEventListener("click", () => {
   });
   render();
 });
-document.querySelector("#step-mpc").addEventListener("click", () => {
-  const current = researchState();
-  const next = dateFromDay(current.day >= 365 ? 1 : current.day + 1);
-  researchControls.month.value = String(next.month);
-  seedDateOptions();
-  researchControls.date.value = String(next.date);
-  render();
-});
+graphControls.play.addEventListener("click", toggleHistoryPlayback);
+graphControls.step.addEventListener("click", stepHistoryDate);
+graphControls.build.addEventListener("click", buildHistoryGraph);
+graphControls.start.addEventListener("change", normalizeGraphMonths);
+graphControls.end.addEventListener("change", normalizeGraphMonths);
 document.querySelector("#export-csv").addEventListener("click", exportCsv);
 
-render();
+setHistoricalControlState();
+refreshUSGSBaseline();
