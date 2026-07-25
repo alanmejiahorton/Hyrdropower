@@ -34,13 +34,17 @@ function nearestFallbackDate(date) {
 }
 
 function dailyUrl(siteId, date) {
+  return dailyRangeUrl(siteId, date, nextDate(date), "10");
+}
+
+function dailyRangeUrl(siteId, startDate, endDate, limit = "10000") {
   const params = new URLSearchParams({
     f: "json",
     monitoring_location_id: siteId,
     parameter_code: DISCHARGE_PARAMETER,
     statistic_id: DAILY_MEAN_STATISTIC,
-    time: `${date}T00:00:00Z/${nextDate(date)}T00:00:00Z`,
-    limit: "10"
+    time: `${startDate}T00:00:00Z/${endDate}T00:00:00Z`,
+    limit
   });
   return `${USGS_DAILY_ENDPOINT}?${params.toString()}`;
 }
@@ -70,6 +74,27 @@ async function fetchDailyMean(site, date) {
     date: feature.properties.time,
     approvalStatus: feature.properties.approval_status || "unknown"
   };
+}
+
+async function fetchDailyRange(site, startDate, endDate) {
+  const response = await fetch(dailyRangeUrl(site.id, startDate, endDate), dailyRequestOptions());
+  if (!response.ok) throw new Error(`USGS range request failed for ${site.id}: ${response.status}`);
+  const data = await response.json();
+  return (data.features || [])
+    .map((feature) => {
+      const value = Number(feature.properties?.value);
+      if (!Number.isFinite(value)) return null;
+      return {
+        site: site.id,
+        label: site.label,
+        role: site.role,
+        value,
+        unit: feature.properties.unit_of_measure || "ft^3/s",
+        date: feature.properties.time,
+        approvalStatus: feature.properties.approval_status || "unknown"
+      };
+    })
+    .filter((reading) => reading && reading.date >= startDate && reading.date < endDate);
 }
 
 function monthFromDate(date) {
@@ -136,9 +161,38 @@ async function loadUSGSBaseline(date) {
   }
 }
 
+async function loadUSGSDailyRange(startDate, endDate) {
+  const settled = await Promise.allSettled(BASIN_FLOW_GAGES.map((site) => fetchDailyRange(site, startDate, endDate)));
+  const readingsByDate = new Map();
+  settled
+    .filter((item) => item.status === "fulfilled")
+    .flatMap((item) => item.value)
+    .forEach((reading) => {
+      if (!readingsByDate.has(reading.date)) readingsByDate.set(reading.date, []);
+      readingsByDate.get(reading.date).push(reading);
+    });
+  if (!readingsByDate.size) throw new Error(`No USGS daily discharge values returned from ${startDate} to ${endDate}`);
+  return Array.from(readingsByDate.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, readings]) => {
+      const releaseReadings = readings.filter((item) => item.role === "Release gage");
+      const indexReadings = releaseReadings.length ? releaseReadings : readings;
+      const totalCfs = indexReadings.reduce((sum, item) => sum + item.value, 0);
+      return baselineFromCfs(
+        date,
+        totalCfs,
+        readings,
+        "USGS OGC daily values API",
+        `${indexReadings.length} daily release/inflow gage${indexReadings.length === 1 ? "" : "s"} averaged in selected interval.`
+      );
+    });
+}
+
 window.usgsData = {
   loadUSGSBaseline,
+  loadUSGSDailyRange,
   dailyUrl,
+  dailyRangeUrl,
   dailyRequestOptions,
   sites: BASIN_FLOW_GAGES
 };

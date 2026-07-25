@@ -284,7 +284,7 @@ select:hover {
   display: block;
   border: 1px solid #e4e8e3;
   border-radius: 8px;
-  background: #d9ddd6;
+  background: #dceff6;
   cursor: grab;
   touch-action: none;
 }
@@ -294,10 +294,19 @@ select:hover {
 }
 
 .basin-shape {
-  fill: rgba(116, 127, 118, 0.18);
-  stroke: #4e5751;
-  stroke-width: 2;
-  opacity: 0.85;
+  fill: rgba(25, 93, 116, 0.12);
+  stroke: rgba(146, 212, 230, 0.62);
+  stroke-width: 1;
+  opacity: 1;
+}
+
+.map-basemap {
+  opacity: 0.96;
+  pointer-events: none;
+}
+
+.map-hud {
+  pointer-events: none;
 }
 
 .state-shape {
@@ -326,8 +335,8 @@ select:hover {
 
 .river-main {
   fill: none;
-  stroke: #126fb2;
-  stroke-width: 4;
+  stroke: var(--river);
+  stroke-width: 2;
   stroke-linecap: round;
   stroke-linejoin: round;
   opacity: 0.76;
@@ -346,18 +355,18 @@ select:hover {
   stroke: var(--river);
   stroke-width: 5;
   stroke-linecap: round;
-  opacity: 0.36;
+  opacity: 0.1;
 }
 
 .flow-link {
   fill: none;
   stroke: #0f75b6;
-  stroke-width: 2.5;
+  stroke-width: 8;
   stroke-dasharray: 8 10;
   stroke-linecap: round;
   stroke-linejoin: round;
   animation: flow 1.6s linear infinite;
-  opacity: 0.7;
+  opacity: 0.9;
 }
 
 @keyframes flow {
@@ -391,7 +400,7 @@ select:hover {
 
 .node text {
   fill: var(--ink);
-  font-size: 14px;
+  font-size: 40px;
   font-weight: 720;
   paint-order: stroke;
   stroke: rgba(240, 241, 236, 0.92);
@@ -401,7 +410,7 @@ select:hover {
 
 .node .subtext {
   fill: #3b4a43;
-  font-size: 12px;
+  font-size: 30px;
   font-weight: 650;
 }
 
@@ -421,10 +430,16 @@ select:hover {
   fill: #23302a;
   font-size: 12px;
   font-weight: 800;
+  paint-order: stroke;
+  stroke: rgba(220, 239, 246, 0.92);
+  stroke-width: 4px;
+  stroke-linejoin: round;
 }
 
 .north-arrow path {
   fill: #23302a;
+  stroke: rgba(220, 239, 246, 0.92);
+  stroke-width: 2;
 }
 
 .detail-panel {
@@ -509,9 +524,25 @@ dd {
 }
 
 .signal strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   margin-bottom: 3px;
   font-size: 0.78rem;
   text-transform: uppercase;
+}
+
+.signal-info-button {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 0.72rem;
+  line-height: 1;
+  color: var(--river);
+  background: var(--river-soft);
+  border-color: transparent;
 }
 
 .status-info {

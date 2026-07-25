@@ -211,7 +211,7 @@ const mapPositions = {
 };
 
 const releaseMultipliers = Object.fromEntries(developments.map((d) => [d.id, 100]));
-const mapState = { scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0, originX: 0, originY: 0 };
+const mapState = { scale: .6, x: 175, y: 0, dragging: false, startX: 0, startY: 0, originX: 0, originY: 0 };
 
 const controls = {
   customMode: document.querySelector("#custom-mode"),
@@ -230,6 +230,7 @@ const graphControls = {
   build: document.querySelector("#build-history-graph"),
   status: document.querySelector("#graph-maker-status"),
   chart: document.querySelector("#history-dispatch-chart"),
+  downsample: document.querySelector("#graph-downsample"),
   play: document.querySelector("#play-history"),
   step: document.querySelector("#step-history")
 };
@@ -240,7 +241,7 @@ const selected = {
 
 let usgsBaseline = null;
 let playbackTimer = null;
-const historyGraphCache = new Map();
+const historyRangeCache = new Map();
 
 const statusDefinitions = {
   Normal: "Operating within modeled dispatch, release, storage, and compliance guardrails.",
@@ -284,14 +285,14 @@ function fmt(value, digits = 0) {
   });
 }
 
-function isoToday() {
-  return new Date().toISOString().slice(0, 10);
-}
-
 function addDays(date, days) {
   const next = new Date(`${date}T00:00:00Z`);
   next.setUTCDate(next.getUTCDate() + days);
   return next.toISOString().slice(0, 10);
+}
+
+function daysBetween(startDate, endDate) {
+  return Math.round((new Date(`${endDate}T00:00:00Z`) - new Date(`${startDate}T00:00:00Z`)) / 86400000);
 }
 
 function clampDate(date, min, max) {
@@ -312,6 +313,14 @@ function addMonths(key, months) {
   const date = new Date(`${key}-01T00:00:00Z`);
   date.setUTCMonth(date.getUTCMonth() + months);
   return date.toISOString().slice(0, 7);
+}
+
+function ceilTo25(value) {
+  return Math.max(25, Math.ceil(value / 25) * 25);
+}
+
+function tickStep25(maxValue, targetTicks = 8) {
+  return Math.max(25, Math.ceil(maxValue / Math.max(1, targetTicks) / 25) * 25);
 }
 
 function optionLabel(d) {
@@ -476,34 +485,26 @@ function drawTopology(rows) {
   viewport.setAttribute("transform", `translate(${mapState.x} ${mapState.y}) scale(${mapState.scale})`);
   svg.appendChild(viewport);
 
+  const basemap = document.createElementNS(ns, "image");
+  basemap.setAttribute("class", "map-basemap");
+  basemap.setAttribute("href", "assets/NCSC-cropped.svg");
+  basemap.setAttribute("x", "-600");
+  basemap.setAttribute("y", "-175");
+  basemap.setAttribute("width", "2880");
+  basemap.setAttribute("height", "1860");
+  basemap.setAttribute("preserveAspectRatio", "xMidYMid meet");
+  viewport.appendChild(basemap);
+
   const group = document.createElementNS(ns, "g");
-  group.setAttribute("transform", "translate(78 -88)");
+  group.setAttribute("transform", "translate(0 0)");
   viewport.appendChild(group);
 
-  [
-    { cls: "state-shape nc-shape", d: "M42 322 L88 274 L132 225 L166 170 L230 112 L326 94 L462 132 L584 178 L722 238 L806 304 L764 370 L664 410 L520 438 L352 424 L214 392 L96 360 Z" },
-    { cls: "state-shape sc-shape", d: "M104 360 L222 392 L356 424 L522 438 L662 412 L762 372 L806 430 L776 520 L728 630 L746 742 L822 824 L718 926 L596 900 L518 792 L458 670 L364 570 L244 486 L118 438 Z" },
-    { cls: "basin-shape", d: "M105 118 L155 80 L238 50 L342 72 L460 88 L565 122 L596 205 L690 250 L674 360 L713 438 L675 550 L716 640 L704 738 L778 810 L742 900 L635 918 L576 820 L546 702 L504 590 L516 496 L478 382 L410 318 L318 292 L234 260 L150 252 L88 205 Z" }
-  ].forEach((shape) => {
-    const path = document.createElementNS(ns, "path");
-    path.setAttribute("class", shape.cls);
-    path.setAttribute("d", shape.d);
-    group.appendChild(path);
-  });
-
-  [
-    { text: "North Carolina", x: 120, y: 395 },
-    { text: "South Carolina", x: 112, y: 458 },
-    { text: "Catawba-Wateree River Basin", x: 96, y: 620 },
-    { text: "FERC Project No. 2232", x: 96, y: 650 }
-  ].forEach((label) => {
-    const text = document.createElementNS(ns, "text");
-    text.setAttribute("class", label.text.includes("FERC") ? "map-caption small" : "map-caption");
-    text.setAttribute("x", label.x);
-    text.setAttribute("y", label.y);
-    text.textContent = label.text;
-    group.appendChild(text);
-  });
+  /*
+  const basin = document.createElementNS(ns, "path");
+  basin.setAttribute("class", "basin-shape");
+  basin.setAttribute("d", "M264 112 L316 126 L366 156 L408 204 L446 274 L466 350 L486 418 L508 480 L558 556 L622 596 L592 614 L528 560 L494 492 L468 424 L448 350 L422 282 L386 218 L346 166 L296 138 Z");
+  group.appendChild(basin);
+  */
 
   const riverPath = positions.map((p, index) => `${index ? "L" : "M"} ${p.x} ${p.y}`).join(" ");
   const river = document.createElementNS(ns, "path");
@@ -522,9 +523,12 @@ function drawTopology(rows) {
   });
 
   positions.forEach((d) => {
-    const reservoir = document.createElementNS(ns, "path");
+    const reservoir = document.createElementNS(ns, "ellipse");
     reservoir.setAttribute("class", "reservoir-shape");
-    reservoir.setAttribute("d", reservoirPath(d));
+    reservoir.setAttribute("cx", d.x);
+    reservoir.setAttribute("cy", d.y);
+    reservoir.setAttribute("rx", d.reservoirWidth);
+    reservoir.setAttribute("ry", d.reservoirHeight);
     reservoir.setAttribute("transform", `rotate(${d.angle} ${d.x} ${d.y})`);
     reservoir.addEventListener("click", () => selectDevelopment(d.id));
     group.appendChild(reservoir);
@@ -556,40 +560,45 @@ function drawTopology(rows) {
     node.appendChild(ring);
 
     const label = document.createElementNS(ns, "text");
-    label.setAttribute("x", d.labelX);
+    label.setAttribute("x", d.labelX - 30);
     label.setAttribute("y", d.labelY);
     label.textContent = d.reservoir.replace("Lake ", "").replace(" Reservoir", "");
     node.appendChild(label);
 
     const sub = document.createElementNS(ns, "text");
     sub.setAttribute("class", "subtext");
-    sub.setAttribute("x", d.labelX);
-    sub.setAttribute("y", d.labelY + 16);
+    sub.setAttribute("x", d.labelX - 30);
+    sub.setAttribute("y", d.labelY + 25);
     sub.textContent = `${fmt(d.release)} cfs`;
     node.appendChild(sub);
 
     group.appendChild(node);
   });
 
+  const hud = document.createElementNS(ns, "g");
+  hud.setAttribute("class", "map-hud");
+  svg.appendChild(hud);
+
+  const scaleMiles = Math.max(10, (21 / mapState.scale / 5) * 5);
   const scale = document.createElementNS(ns, "g");
   scale.setAttribute("class", "map-scale");
-  scale.setAttribute("transform", "translate(610 920)");
+  scale.setAttribute("transform", "translate(780 570)");
   scale.innerHTML = `
     <line x1="0" y1="0" x2="120" y2="0"></line>
     <line x1="0" y1="-7" x2="0" y2="7"></line>
     <line x1="60" y1="-5" x2="60" y2="5"></line>
     <line x1="120" y1="-7" x2="120" y2="7"></line>
     <text x="0" y="24">0</text>
-    <text x="48" y="24">25</text>
-    <text x="99" y="24">50 mi</text>
+    <text x="48" y="24">${fmt(scaleMiles / 2)}</text>
+    <text x="95" y="24">${fmt(scaleMiles)} mi</text>
   `;
-  group.appendChild(scale);
+  hud.appendChild(scale);
 
   const north = document.createElementNS(ns, "g");
   north.setAttribute("class", "north-arrow");
-  north.setAttribute("transform", "translate(760 120)");
+  north.setAttribute("transform", "translate(890 82)");
   north.innerHTML = `<path d="M0 -32 L12 20 L0 12 L-12 20 Z"></path><text x="-5" y="-42">N</text>`;
-  group.appendChild(north);
+  hud.appendChild(north);
 }
 
 function updateDetails(rows) {
@@ -698,6 +707,7 @@ function setHistoricalControlState() {
   graphControls.step.disabled = !historical;
   graphControls.start.disabled = !historical;
   graphControls.end.disabled = !historical;
+  graphControls.downsample.disabled = !historical;
   graphControls.build.disabled = !historical;
   if (!historical) stopHistoryPlayback();
 }
@@ -729,6 +739,7 @@ function renderCompliance(state, rows, availableCapacity) {
     {
       label: "Spring stabilization",
       level: state.spring ? "warning" : "normal",
+      infoKey: "spring",
       text: state.spring
         ? "Spring stabilization active for Lake Wateree, Wylie, Norman, and James."
         : "Spring stabilization disabled; reservoirs can fluctuate more freely in the model."
@@ -766,8 +777,21 @@ function renderCompliance(state, rows, availableCapacity) {
   signals.sort((a, b) => signalPriority[a.level] - signalPriority[b.level]).forEach((signal) => {
     const div = document.createElement("div");
     div.className = `signal ${signal.level}`;
-    div.innerHTML = `<strong>${signal.label}</strong><span>${signal.text}</span>`;
+    const panel = document.querySelector("#spring-info-panel");
+    const expanded = signal.infoKey === "spring" && panel && !panel.classList.contains("is-hidden");
+    const infoButton = signal.infoKey
+      ? `<button class="signal-info-button" type="button" aria-expanded="${expanded}" aria-controls="spring-info-panel" data-signal-info="${signal.infoKey}" aria-label="Show spring level stabilization information">i</button>`
+      : "";
+    div.innerHTML = `<strong>${signal.label}${infoButton}</strong><span>${signal.text}</span>`;
     list.appendChild(div);
+  });
+
+  list.querySelectorAll("[data-signal-info='spring']").forEach((button) => {
+    button.addEventListener("click", () => {
+      const panel = document.querySelector("#spring-info-panel");
+      const isHidden = panel.classList.toggle("is-hidden");
+      button.setAttribute("aria-expanded", String(!isHidden));
+    });
   });
 }
 
@@ -783,7 +807,7 @@ function drawWaterValueChart(state) {
     const value = Math.max(8, state.price * (1.35 - storage / 130) + state.demand * 0.12 + Math.max(0, 70 - state.inflow) * 0.7);
     return { storage, value };
   });
-  const maxValue = Math.max(...points.map((p) => p.value)) * 1.08;
+  const maxValue = ceilTo25(Math.max(...points.map((p) => p.value)) * 1.08);
   const x = (storage) => pad + (storage / 100) * (width - pad * 2);
   const y = (value) => height - pad - (value / maxValue) * (height - pad * 2);
   const line = points.map((p, i) => `${i ? "L" : "M"} ${x(p.storage)} ${y(p.value)}`).join(" ");
@@ -822,8 +846,8 @@ function drawWaterValueChart(state) {
     svg.appendChild(tickText);
   });
 
-  [0.25, 0.5, 0.75, 1].forEach((ratio) => {
-    const value = maxValue * ratio;
+  const valueStep = tickStep25(maxValue, 6);
+  for (let value = valueStep; value <= maxValue; value += valueStep) {
     const tickY = y(value);
     const tickLine = document.createElementNS(ns, "line");
     tickLine.setAttribute("class", "chart-tick");
@@ -839,7 +863,7 @@ function drawWaterValueChart(state) {
     tickText.setAttribute("y", tickY + 4);
     tickText.textContent = `$${fmt(value)}`;
     svg.appendChild(tickText);
-  });
+  }
 
   const areaPath = document.createElementNS(ns, "path");
   areaPath.setAttribute("class", "chart-area");
@@ -884,7 +908,7 @@ function stopHistoryPlayback() {
 async function stepHistoryDate() {
   if (controls.customMode.checked) return;
   const min = controls.usgsDate.min || "2008-01-01";
-  const max = controls.usgsDate.max || isoToday();
+  const max = controls.usgsDate.max || "2026-12-31";
   const next = addDays(controls.usgsDate.value || min, 1);
   controls.usgsDate.value = clampDate(next > max ? min : next, min, max);
   await refreshUSGSBaseline();
@@ -901,18 +925,9 @@ function toggleHistoryPlayback() {
   }, 1100);
 }
 
-async function loadMonthlyBaseline(month) {
-  const maxDate = controls.usgsDate.max || isoToday();
-  const date = clampDate(monthStart(month), "2008-01-01", maxDate);
-  if (!historyGraphCache.has(date)) {
-    historyGraphCache.set(date, window.usgsData.loadUSGSBaseline(date));
-  }
-  return historyGraphCache.get(date);
-}
-
 function normalizeGraphMonths() {
   const min = "2008-01";
-  const max = "2026-06";
+  const max = "2026-12";
   let start = graphControls.start.value || "2019-03";
   let end = graphControls.end.value || start;
   if (start < min) start = min;
@@ -923,6 +938,47 @@ function normalizeGraphMonths() {
   return { start, end };
 }
 
+function rangeEndDate(month) {
+  return monthStart(addMonths(month, 1));
+}
+
+function graphBucketKey(date, mode) {
+  return mode === "year" ? date.slice(0, 4) : date.slice(0, 7);
+}
+
+function downsampleDispatch(dailyPoints, mode) {
+  const buckets = new Map();
+  dailyPoints.forEach((point) => {
+    const key = graphBucketKey(point.date, mode);
+    if (!buckets.has(key)) buckets.set(key, { label: key, dispatchSum: 0, count: 0 });
+    const bucket = buckets.get(key);
+    bucket.dispatchSum += point.dispatch;
+    bucket.count += 1;
+  });
+  return Array.from(buckets.values()).map((bucket) => ({
+    month: bucket.label,
+    dispatch: bucket.dispatchSum / Math.max(1, bucket.count),
+    count: bucket.count
+  }));
+}
+
+function weeklyAverageDispatch(dailyPoints, startDate) {
+  const buckets = new Map();
+  dailyPoints.forEach((point) => {
+    const weekIndex = Math.floor(daysBetween(startDate, point.date) / 7);
+    const key = addDays(startDate, weekIndex * 7);
+    if (!buckets.has(key)) buckets.set(key, { label: key.slice(5), dispatchSum: 0, count: 0 });
+    const bucket = buckets.get(key);
+    bucket.dispatchSum += point.dispatch;
+    bucket.count += 1;
+  });
+  return Array.from(buckets.values()).map((bucket) => ({
+    month: bucket.label,
+    dispatch: bucket.dispatchSum / Math.max(1, bucket.count),
+    count: bucket.count
+  }));
+}
+
 function drawHistoryDispatchChart(points) {
   const svg = graphControls.chart;
   svg.innerHTML = "";
@@ -930,19 +986,19 @@ function drawHistoryDispatchChart(points) {
   const height = 320;
   const pad = 58;
   if (!points.length) return;
-  const maxDispatch = Math.max(1, Math.max(...points.map((p) => p.dispatch)) * 1.12);
+  const maxDispatch = ceilTo25(Math.max(...points.map((p) => p.dispatch)) * 1.12);
   const x = (index) => pad + (points.length === 1 ? 0.5 : index / (points.length - 1)) * (width - pad * 2);
   const y = (dispatch) => height - pad - (dispatch / maxDispatch) * (height - pad * 2);
   svg.appendChild(svgEl("line", { class: "chart-axis", x1: pad, y1: height - pad, x2: width - pad, y2: height - pad }));
   svg.appendChild(svgEl("line", { class: "chart-axis", x1: pad, y1: pad, x2: pad, y2: height - pad }));
-  [0, 0.25, 0.5, 0.75, 1].forEach((ratio) => {
-    const value = maxDispatch * ratio;
+  const dispatchStep = tickStep25(maxDispatch, 7);
+  for (let value = 0; value <= maxDispatch; value += dispatchStep) {
     const tickY = y(value);
     svg.appendChild(svgEl("line", { class: "chart-tick", x1: pad - 6, y1: tickY, x2: pad, y2: tickY }));
     const label = svgEl("text", { class: "chart-label", x: 8, y: tickY + 4 });
     label.textContent = `${fmt(value)} MW`;
     svg.appendChild(label);
-  });
+  }
   const tickIndexes = Array.from(new Set([0, Math.floor(points.length / 3), Math.floor((points.length * 2) / 3), points.length - 1]));
   tickIndexes.forEach((index) => {
     const tickX = x(index);
@@ -957,7 +1013,7 @@ function drawHistoryDispatchChart(points) {
   svg.appendChild(svgEl("path", { class: "chart-line", d: line }));
   [
     { text: "Simulated dispatch (MW)", x: 8, y: 24 },
-    { text: "Historical month", x: width / 2 - 45, y: height - 10 }
+    { text: points[0].month.length === 5 ? "Historical week" : points[0].month.length === 4 ? "Historical year" : "Historical month", x: width / 2 - 45, y: height - 10 }
   ].forEach((label) => {
     const text = svgEl("text", { class: "chart-label", x: label.x, y: label.y });
     text.textContent = label.text;
@@ -968,22 +1024,26 @@ function drawHistoryDispatchChart(points) {
 async function buildHistoryGraph() {
   if (controls.customMode.checked) return;
   const { start, end } = normalizeGraphMonths();
-  const months = [];
-  for (let month = start; month <= end; month = addMonths(month, 1)) {
-    months.push(month);
-    if (month === end) break;
+  const downsample = graphControls.downsample.value;
+  const startDate = monthStart(start);
+  const endDate = rangeEndDate(end);
+  const useWeekly = daysBetween(startDate, endDate) <= 366;
+  const cacheKey = `${startDate}/${endDate}`;
+  graphControls.status.textContent = `Fetching daily USGS values from ${start} to ${end}...`;
+  if (!historyRangeCache.has(cacheKey)) {
+    historyRangeCache.set(cacheKey, window.usgsData.loadUSGSDailyRange(startDate, endDate));
   }
-  graphControls.status.textContent = `Loading ${months.length} month${months.length === 1 ? "" : "s"}...`;
-  const points = [];
-  for (const month of months) {
-    const baseline = await loadMonthlyBaseline(month);
+  const baselines = await historyRangeCache.get(cacheKey);
+  const dailyPoints = baselines.map((baseline) => {
     const state = scenarioFromBaseline(baseline);
     const dispatch = stationRows(state).rows.reduce((sum, d) => sum + d.dispatch, 0);
-    points.push({ month, dispatch, baseline });
-    graphControls.status.textContent = `Loaded ${points.length}/${months.length}`;
-  }
+    return { date: baseline.sourceDate, dispatch };
+  });
+  const points = useWeekly ? weeklyAverageDispatch(dailyPoints, startDate) : downsampleDispatch(dailyPoints, downsample);
   drawHistoryDispatchChart(points);
-  graphControls.status.textContent = `${start} to ${end}: simulated dispatch in MW`;
+  graphControls.status.textContent = useWeekly
+    ? `${start} to ${end}: weekly average simulated dispatch in MW`
+    : `${start} to ${end}: ${downsample === "year" ? "yearly" : "monthly"} average simulated dispatch in MW`;
 }
 
 const monthLengths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -1300,7 +1360,7 @@ function initMapInteractions() {
 }
 
 function zoomMap(factor) {
-  mapState.scale = Math.max(0.65, Math.min(2.4, mapState.scale * factor));
+  mapState.scale = Math.max(0.2, Math.min(2.4, mapState.scale * factor));
   drawTopology(stationRows(scenario()).rows);
 }
 
@@ -1392,7 +1452,7 @@ function exportCsv() {
 seedOutageOptions();
 seedReleaseControls();
 initMapInteractions();
-controls.usgsDate.max = isoToday();
+controls.usgsDate.max = "2026-12-31";
 controls.usgsDate.value = clampDate(controls.usgsDate.value, controls.usgsDate.min, controls.usgsDate.max);
 document.querySelectorAll("[data-metric-help]").forEach((button) => {
   button.addEventListener("click", () => showMetricHelp(button.dataset.metricHelp));
@@ -1403,8 +1463,8 @@ controls.usgsDate.addEventListener("change", refreshUSGSBaseline);
 controls.outage.addEventListener("change", render);
 document.querySelector("#reset-view").addEventListener("click", () => {
   selected.id = null;
-  mapState.scale = 1;
-  mapState.x = 0;
+  mapState.scale = .6;
+  mapState.x = 175;
   mapState.y = 0;
   render();
 });
@@ -1421,6 +1481,7 @@ graphControls.step.addEventListener("click", stepHistoryDate);
 graphControls.build.addEventListener("click", buildHistoryGraph);
 graphControls.start.addEventListener("change", normalizeGraphMonths);
 graphControls.end.addEventListener("change", normalizeGraphMonths);
+graphControls.downsample.addEventListener("change", buildHistoryGraph);
 document.querySelector("#export-csv").addEventListener("click", exportCsv);
 
 setHistoricalControlState();
