@@ -108,7 +108,7 @@
           <p class="historical-lock-note">Historical mode is the default. Turn on custom controls to adjust inflow, demand, price, reserve, outages, and reservoir release schedules.</p>
           <label for="usgs-date" class="usgs-date-field">
             USGS baseline date
-            <input id="usgs-date" type="date" value="2019-03-07" min="2008-01-01" max="2026-12-31">
+            <input id="usgs-date" type="date" value="2024-08-19" min="2009-01-01" max="2026-12-31">
             <span id="usgs-status">Loading USGS baseline...</span>
           </label>
           <div class="history-playback" aria-label="Historical playback controls">
@@ -216,11 +216,11 @@
         <div class="graph-controls">
           <label for="graph-start">
             Start month
-            <input id="graph-start" type="month" min="2008-01" max="2026-12" value="2019-03">
+            <input id="graph-start" type="month" min="2009-01" max="2026-12" value="2024-08">
           </label>
           <label for="graph-end">
             End month
-            <input id="graph-end" type="month" min="2008-01" max="2026-12" value="2019-06">
+            <input id="graph-end" type="month" min="2009-01" max="2026-12" value="2024-08">
           </label>
           <label for="graph-downsample">
             Downsample
@@ -228,7 +228,6 @@
               <option value="month" selected>Monthly average</option>
               <option value="year">Yearly average</option>
             </select>
-            <span>Intervals of one year or less use weekly averages.</span>
           </label>
           <button id="build-history-graph" type="button">Build Graph</button>
         </div>
@@ -242,7 +241,6 @@
         <div class="source-grid">
           <a href="https://www.ferc.gov/sites/default/files/2020-05/P-2232-522.pdf" target="_blank" rel="noreferrer"><strong>FERC Order</strong><span>November 25, 2015 Catawba-Wateree new license order, Project No. 2232-522.</span></a>
           <a href="https://www.duke-energy.com/community/lakes/hydroelectric-relicensing/catawba" target="_blank" rel="noreferrer"><strong>Duke Relicensing Portal</strong><span>Project background, license agreement links, and Duke Energy lake resources.</span></a>
-          <a href="assets/NCSC-cropped.svg" target="_blank" rel="noreferrer"><strong>NC/SC Basemap</strong><span>User-provided North Carolina and South Carolina SVG basemap used for reservoir overlay placement.</span></a>
           <a href="https://api.waterdata.usgs.gov/ogcapi/v0/openapi?f=html#/daily/describeDailyCollection" target="_blank" rel="noreferrer"><strong>USGS Daily Values API</strong><span>OGC daily streamflow observations used for historical hydrologic baseline construction.</span></a>
           <a href="https://waterdata.usgs.gov/monitoring-location/USGS-02138520/#dataTypeId=continuous-00060-0&period=P7D&showFieldMeasurements=true&showMedian=true" target="_blank" rel="noreferrer"><strong>USGS-02138520</strong><span>Catawba River below Lake James release/discharge reference.</span></a>
           <a href="https://waterdata.usgs.gov/monitoring-location/USGS-02145910/#dataTypeId=continuous-00060-0&period=P7D&showFieldMeasurements=true&showMedian=true" target="_blank" rel="noreferrer"><strong>USGS-02145910</strong><span>Catawba River below Lake Wylie release/discharge reference.</span></a>

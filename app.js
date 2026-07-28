@@ -212,6 +212,8 @@ const mapPositions = {
 
 const releaseMultipliers = Object.fromEntries(developments.map((d) => [d.id, 100]));
 const mapState = { scale: .6, x: 175, y: 0, dragging: false, startX: 0, startY: 0, originX: 0, originY: 0 };
+const SPRING_STABILIZATION_PENALTY_RATIO = 0.07;
+const SPRING_STABILIZATION_PENALTY_POINTS = SPRING_STABILIZATION_PENALTY_RATIO * 100;
 
 const controls = {
   customMode: document.querySelector("#custom-mode"),
@@ -264,11 +266,11 @@ const metricHelp = {
   dispatch: {
     title: "Simulated Dispatch",
     equation: "Simulated dispatch (MW) = sum(min(capacity MW, capacity MW x weightedDispatch x localFlow x storageDispatch))",
-    description: "Historical mode uses basin release gages and storage-weighted peaking logic so large reservoirs are not throttled by headwater flow alone. Manual mode still applies individual release schedules."
+    description: "Historical mode uses the Lake James reference discharge gage and storage-weighted peaking logic so large reservoirs are not throttled by changing downstream gage availability. Manual mode still applies individual release schedules."
   },
   storage: {
     title: "Usable Storage",
-    equation: "Usable storage (%) = clamp(47 + 0.43 x inflow % - 0.12 x demand % - springPenalty %, 31, 99)",
+    equation: "Usable storage (%) = clamp(47 + 0.43 x inflow % - 0.12 x demand % - springStabilizationPenaltyPoints, 31, 99)",
     description: "This planning proxy estimates system storage pressure from hydrologic supply, demand draw, and spring stabilization constraints, then weights the acre-foot display by total reservoir scale."
   },
   waterValue: {
@@ -362,22 +364,32 @@ function seedReleaseControls() {
   });
 }
 
-function scenario() {
-  const historical = !controls.customMode.checked && usgsBaseline;
-  const inflow = historical ? usgsBaseline.inflowPercent : Number(controls.inflow.value);
-  const demand = historical ? usgsBaseline.demand : Number(controls.demand.value);
-  const price = historical ? usgsBaseline.price : Number(controls.price.value);
-  const reserve = historical ? usgsBaseline.reserve : Number(controls.reserve.value);
-  const spring = historical ? usgsBaseline.spring : controls.spring.checked;
-  const droughtPenalty = inflow < 55 ? (55 - inflow) * 0.006 : 0;
-  const wetSpillPenalty = inflow > 112 ? (inflow - 112) * 0.005 : 0;
-  const stabilizationPenalty = spring ? 0.07 : 0;
-  const reservePenalty = reserve / 100;
-  const waterAvailability = Math.max(0.2, Math.min(1.45, inflow / 100 - droughtPenalty - stabilizationPenalty));
-  const demandPull = Math.max(0.2, Math.min(1, demand / 100 + price / 420));
-  const baseDispatch = waterAvailability * 0.6 + demandPull * 0.4;
-  const dispatchFactor = Math.max(0.15, Math.min(1, baseDispatch - reservePenalty - wetSpillPenalty * 0.35));
-  const storagePercent = Math.max(31, Math.min(99, 47 + inflow * 0.43 - demand * 0.12 - (spring ? 3 : 0)));
+function springStoragePenaltyPercent(spring) {
+  return spring ? SPRING_STABILIZATION_PENALTY_POINTS : 0;
+}
+
+function releaseCfsPerMw(d) {
+  if (d.state === "NC") return 20;
+  if (d.state === "NC/SC") return 17;
+  return 14;
+}
+
+function localFlowByDevelopmentState(d) {
+  if (d.state === "NC") return 1.02;
+  if (d.state === "NC/SC") return 0.98;
+  return 0.94;
+}
+
+function scenarioState({ historical, inflow, demand, price, reserve, spring, outage }) {
+  const droughtPenalty = inflow < 55 ? (55 - inflow) * 0.003 : 0;
+  const wetSpillPenalty = inflow > 112 ? (inflow - 112) * 0.003 : 0;
+  const stabilizationPenalty = spring ? SPRING_STABILIZATION_PENALTY_RATIO : 0;
+  const reservePenalty = (reserve / 100) * 0.45;
+  const waterAvailability = Math.max(0.35, Math.min(1.6, 0.62 + inflow / 120 - droughtPenalty - stabilizationPenalty));
+  const demandPull = Math.max(0.35, Math.min(1.08, demand / 100 + price / 420));
+  const baseDispatch = waterAvailability * 0.72 + demandPull * 0.28;
+  const dispatchFactor = Math.max(0.25, Math.min(1.06, baseDispatch - reservePenalty - wetSpillPenalty * 0.12));
+  const storagePercent = Math.max(31, Math.min(99, 47 + inflow * 0.43 - demand * 0.12 - springStoragePenaltyPercent(spring)));
   const waterValue = Math.max(8, price * (1.35 - storagePercent / 130) + demand * 0.12 + Math.max(0, 70 - inflow) * 0.7);
 
   return {
@@ -391,53 +403,47 @@ function scenario() {
     dispatchFactor,
     storagePercent,
     waterValue,
-    outage: historical ? "none" : controls.outage.value
+    outage
   };
 }
 
+function scenario() {
+  const historical = !controls.customMode.checked && usgsBaseline;
+  return scenarioState({
+    historical,
+    inflow: historical ? usgsBaseline.inflowPercent : Number(controls.inflow.value),
+    demand: historical ? usgsBaseline.demand : Number(controls.demand.value),
+    price: historical ? usgsBaseline.price : Number(controls.price.value),
+    reserve: historical ? usgsBaseline.reserve : Number(controls.reserve.value),
+    spring: historical ? usgsBaseline.spring : controls.spring.checked,
+    outage: historical ? "none" : controls.outage.value
+  });
+}
+
 function scenarioFromBaseline(baseline) {
-  const inflow = baseline.inflowPercent;
-  const demand = baseline.demand;
-  const price = baseline.price;
-  const reserve = baseline.reserve;
-  const spring = baseline.spring;
-  const droughtPenalty = inflow < 55 ? (55 - inflow) * 0.006 : 0;
-  const wetSpillPenalty = inflow > 112 ? (inflow - 112) * 0.005 : 0;
-  const stabilizationPenalty = spring ? 0.07 : 0;
-  const reservePenalty = reserve / 100;
-  const waterAvailability = Math.max(0.2, Math.min(1.45, inflow / 100 - droughtPenalty - stabilizationPenalty));
-  const demandPull = Math.max(0.2, Math.min(1, demand / 100 + price / 420));
-  const baseDispatch = waterAvailability * 0.6 + demandPull * 0.4;
-  const dispatchFactor = Math.max(0.15, Math.min(1, baseDispatch - reservePenalty - wetSpillPenalty * 0.35));
-  const storagePercent = Math.max(31, Math.min(99, 47 + inflow * 0.43 - demand * 0.12 - (spring ? 3 : 0)));
-  const waterValue = Math.max(8, price * (1.35 - storagePercent / 130) + demand * 0.12 + Math.max(0, 70 - inflow) * 0.7);
-  return {
+  return scenarioState({
     historical: true,
-    inflow,
-    demand,
-    price,
-    reserve,
-    spring,
-    waterAvailability,
-    dispatchFactor,
-    storagePercent,
-    waterValue,
+    inflow: baseline.inflowPercent,
+    demand: baseline.demand,
+    price: baseline.price,
+    reserve: baseline.reserve,
+    spring: baseline.spring,
     outage: "none"
-  };
+  });
 }
 
 function stationRows(state) {
   let availableCapacity = 0;
-  const rows = developments.map((d, index) => {
+  const rows = developments.map((d) => {
     const out = state.outage === d.id;
     const releaseMultiplier = state.historical ? 1 : releaseMultipliers[d.id] / 100;
     const upstreamStorageWeight = d.storage / totalStorage;
     const storagePeakingStations = ["bridgewater", "cowans", "wylie", "wateree"];
-    const storageDispatch = storagePeakingStations.includes(d.id) && state.storagePercent > 38 ? 0.98 : 0.82;
-    const localFlow = Math.max(0.24, Math.min(1.2, state.waterAvailability * 0.72 + upstreamStorageWeight * 1.35 - index * 0.004));
+    const storageDispatch = storagePeakingStations.includes(d.id) && state.storagePercent > 38 ? 1 : 0.88;
+    const localFlow = Math.max(0.42, Math.min(1.28, (state.waterAvailability * 0.82 + upstreamStorageWeight * 1.05) * localFlowByDevelopmentState(d)));
     const scheduleEffect = Math.max(0.5, Math.min(1.35, releaseMultiplier));
     const dispatch = out ? 0 : Math.min(d.capacity, d.capacity * state.dispatchFactor * localFlow * storageDispatch * (0.72 + scheduleEffect * 0.28));
-    const baseRelease = d.minFlow + dispatch * (index < 5 ? 20 : 14) + Math.max(0, state.inflow - 100) * 8;
+    const baseRelease = d.minFlow + dispatch * releaseCfsPerMw(d) + Math.max(0, state.inflow - 100) * 8;
     const release = Math.round(Math.max(d.minFlow * 0.85, baseRelease * releaseMultiplier));
     availableCapacity += out ? 0 : d.capacity;
 
@@ -487,7 +493,7 @@ function drawTopology(rows) {
 
   const basemap = document.createElementNS(ns, "image");
   basemap.setAttribute("class", "map-basemap");
-  basemap.setAttribute("href", "assets/NCSC-cropped.svg");
+  basemap.setAttribute("href", "NCSC-cropped.svg");
   basemap.setAttribute("x", "-600");
   basemap.setAttribute("y", "-175");
   basemap.setAttribute("width", "2880");
@@ -907,7 +913,7 @@ function stopHistoryPlayback() {
 
 async function stepHistoryDate() {
   if (controls.customMode.checked) return;
-  const min = controls.usgsDate.min || "2008-01-01";
+  const min = controls.usgsDate.min || "2009-01-01";
   const max = controls.usgsDate.max || "2026-12-31";
   const next = addDays(controls.usgsDate.value || min, 1);
   controls.usgsDate.value = clampDate(next > max ? min : next, min, max);
@@ -926,9 +932,9 @@ function toggleHistoryPlayback() {
 }
 
 function normalizeGraphMonths() {
-  const min = "2008-01";
+  const min = "2009-01";
   const max = "2026-12";
-  let start = graphControls.start.value || "2019-03";
+  let start = graphControls.start.value || "2024-08";
   let end = graphControls.end.value || start;
   if (start < min) start = min;
   if (end > max) end = max;
@@ -986,13 +992,16 @@ function drawHistoryDispatchChart(points) {
   const height = 320;
   const pad = 58;
   if (!points.length) return;
-  const maxDispatch = ceilTo25(Math.max(...points.map((p) => p.dispatch)) * 1.12);
+  const dispatchValues = points.map((p) => p.dispatch);
+  const minDispatch = Math.max(0, Math.floor((Math.min(...dispatchValues) - 150) / 25) * 25);
+  const maxDispatch = ceilTo25(Math.max(...dispatchValues) + 50);
+  const dispatchRange = Math.max(25, maxDispatch - minDispatch);
   const x = (index) => pad + (points.length === 1 ? 0.5 : index / (points.length - 1)) * (width - pad * 2);
-  const y = (dispatch) => height - pad - (dispatch / maxDispatch) * (height - pad * 2);
+  const y = (dispatch) => height - pad - ((dispatch - minDispatch) / dispatchRange) * (height - pad * 2);
   svg.appendChild(svgEl("line", { class: "chart-axis", x1: pad, y1: height - pad, x2: width - pad, y2: height - pad }));
   svg.appendChild(svgEl("line", { class: "chart-axis", x1: pad, y1: pad, x2: pad, y2: height - pad }));
-  const dispatchStep = tickStep25(maxDispatch, 7);
-  for (let value = 0; value <= maxDispatch; value += dispatchStep) {
+  const dispatchStep = tickStep25(dispatchRange, 7);
+  for (let value = minDispatch; value <= maxDispatch; value += dispatchStep) {
     const tickY = y(value);
     svg.appendChild(svgEl("line", { class: "chart-tick", x1: pad - 6, y1: tickY, x2: pad, y2: tickY }));
     const label = svgEl("text", { class: "chart-label", x: 8, y: tickY + 4 });
@@ -1034,6 +1043,8 @@ async function buildHistoryGraph() {
     historyRangeCache.set(cacheKey, window.usgsData.loadUSGSDailyRange(startDate, endDate));
   }
   const baselines = await historyRangeCache.get(cacheKey);
+  const requestedDays = daysBetween(startDate, endDate);
+  const excludedDays = Math.max(0, requestedDays - baselines.length);
   const dailyPoints = baselines.map((baseline) => {
     const state = scenarioFromBaseline(baseline);
     const dispatch = stationRows(state).rows.reduce((sum, d) => sum + d.dispatch, 0);
@@ -1042,8 +1053,8 @@ async function buildHistoryGraph() {
   const points = useWeekly ? weeklyAverageDispatch(dailyPoints, startDate) : downsampleDispatch(dailyPoints, downsample);
   drawHistoryDispatchChart(points);
   graphControls.status.textContent = useWeekly
-    ? `${start} to ${end}: weekly average simulated dispatch in MW`
-    : `${start} to ${end}: ${downsample === "year" ? "yearly" : "monthly"} average simulated dispatch in MW`;
+    ? `${start} to ${end}: weekly average simulated dispatch in MW. ${fmt(excludedDays)} date${excludedDays === 1 ? "" : "s"} excluded where Lake James reference gage was unavailable.`
+    : `${start} to ${end}: ${downsample === "year" ? "yearly" : "monthly"} average simulated dispatch in MW. ${fmt(excludedDays)} date${excludedDays === 1 ? "" : "s"} excluded where Lake James reference gage was unavailable.`;
 }
 
 const monthLengths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
@@ -1370,7 +1381,7 @@ function updateLabels(state) {
   document.querySelector("#price-label").textContent = `$${state.price}/MWh`;
   document.querySelector("#reserve-label").textContent = `${state.reserve}%`;
   if (!controls.customMode.checked && usgsBaseline) {
-    document.querySelector("#usgs-status").textContent = `Loaded ${usgsBaseline.sourceDate}: ${fmt(usgsBaseline.totalCfs)} cfs total. ${usgsBaseline.note}`;
+    document.querySelector("#usgs-status").textContent = `Loaded ${usgsBaseline.sourceDate}: ${fmt(usgsBaseline.referenceCfs ?? usgsBaseline.totalCfs)} cfs Lake James reference discharge. ${usgsBaseline.note}`;
   } else if (!controls.customMode.checked) {
     document.querySelector("#usgs-status").textContent = "Loading USGS baseline...";
   } else {
@@ -1452,6 +1463,7 @@ function exportCsv() {
 seedOutageOptions();
 seedReleaseControls();
 initMapInteractions();
+controls.usgsDate.min = "2009-01-01";
 controls.usgsDate.max = "2026-12-31";
 controls.usgsDate.value = clampDate(controls.usgsDate.value, controls.usgsDate.min, controls.usgsDate.max);
 document.querySelectorAll("[data-metric-help]").forEach((button) => {

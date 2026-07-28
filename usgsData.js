@@ -8,15 +8,16 @@ const BASIN_FLOW_GAGES = [
 ];
 const DISCHARGE_PARAMETER = "00060";
 const DAILY_MEAN_STATISTIC = "00003";
-const TOTAL_BASIN_NOMINAL_CFS = 3200;
+const HISTORICAL_REFERENCE_GAGE = "USGS-02138520";
+const REFERENCE_GAGE_NOMINAL_CFS = 280;
 const USGS_API_KEY = "0t44E2CY9Fz22FoMHcwLgGoFh2vSXRpBfnOjx4lV";
 
 const fallbackCache = {
-  "2019-03-07": { totalCfs: 9560, note: "Fallback basin release index from Lake James and Lake Wylie gage examples." },
-  "2019-07-15": { totalCfs: 3900, note: "Fallback summer recreation season basin-flow proxy." },
-  "2020-02-06": { totalCfs: 14200, note: "Fallback high-flow winter storm basin-flow proxy." },
-  "2021-09-10": { totalCfs: 2800, note: "Fallback dry late-summer basin-flow proxy." },
-  "2024-04-18": { totalCfs: 13920, note: "Fallback spring refill proxy with Wateree tailrace data." }
+  "2019-03-07": { referenceCfs: 1710, note: "Fallback Lake James reference discharge proxy." },
+  "2019-07-15": { referenceCfs: 1220, note: "Fallback summer Lake James reference discharge proxy." },
+  "2020-02-06": { referenceCfs: 3110, note: "Fallback high-flow Lake James reference discharge proxy." },
+  "2021-09-10": { referenceCfs: 860, note: "Fallback dry late-summer Lake James reference discharge proxy." },
+  "2024-08-19": { referenceCfs: 1423, note: "Fallback Lake James reference discharge proxy for default historical date." }
 };
 
 function nextDate(date) {
@@ -109,14 +110,20 @@ function demandFromDate(date, inflowPercent) {
   return Math.max(45, Math.min(88, Math.round(57 + seasonalPeak + shoulder + wetCooling)));
 }
 
-function baselineFromCfs(date, totalCfs, readings, source, note) {
-  const inflowPercent = Math.max(20, Math.min(200, Math.round((totalCfs / TOTAL_BASIN_NOMINAL_CFS) * 100)));
+function referenceReading(readings) {
+  return readings.find((item) => item.site === HISTORICAL_REFERENCE_GAGE && Number.isFinite(item.value));
+}
+
+function baselineFromReferenceCfs(date, referenceCfs, readings, source, note) {
+  const inflowPercent = Math.max(20, Math.min(200, Math.round((referenceCfs / REFERENCE_GAGE_NOMINAL_CFS) * 100)));
   const demand = demandFromDate(date, inflowPercent);
   return {
     requestedDate: date,
     sourceDate: date,
     source,
-    totalCfs,
+    referenceGage: HISTORICAL_REFERENCE_GAGE,
+    referenceCfs,
+    totalCfs: referenceCfs,
     inflowPercent,
     demand,
     reserve: 10,
@@ -132,28 +139,27 @@ async function loadUSGSBaseline(date) {
     const settled = await Promise.allSettled(BASIN_FLOW_GAGES.map((site) => fetchDailyMean(site, date)));
     const readings = settled.filter((item) => item.status === "fulfilled").map((item) => item.value);
     if (!readings.length) throw new Error(`No USGS daily discharge values returned for ${date}`);
-    const releaseReadings = readings.filter((item) => item.role === "Release gage");
-    const indexReadings = releaseReadings.length ? releaseReadings : readings;
-    const totalCfs = indexReadings.reduce((sum, item) => sum + item.value, 0);
+    const reference = referenceReading(readings);
+    if (!reference) throw new Error(`Reference gage ${HISTORICAL_REFERENCE_GAGE} unavailable for ${date}`);
     const missing = settled
       .map((item, index) => (item.status === "rejected" ? BASIN_FLOW_GAGES[index].label : null))
       .filter(Boolean);
     const missingNote = missing.length ? ` Missing for selected date: ${missing.join(", ")}.` : "";
-    return baselineFromCfs(
+    return baselineFromReferenceCfs(
       date,
-      totalCfs,
+      reference.value,
       readings,
       "USGS OGC daily values API",
-      `${indexReadings.length} basin release/inflow gage${indexReadings.length === 1 ? "" : "s"}: ${indexReadings.map((item) => `${item.label}: ${Math.round(item.value)} ${item.unit}`).join("; ")}.${missingNote}`
+      `Lake James reference gage ${reference.site}: ${Math.round(reference.value)} ${reference.unit}.${missingNote}`
     );
   } catch (error) {
     const fallbackDate = nearestFallbackDate(date);
     const fallback = fallbackCache[fallbackDate];
-    const baseline = baselineFromCfs(
+    const baseline = baselineFromReferenceCfs(
       fallbackDate,
-      fallback.totalCfs,
+      fallback.referenceCfs,
       [],
-      "Fallback cache after USGS API error",
+      "Fallback cache after reference gage API error",
       `${fallback.note} Live request issue: ${error.message}`
     );
     baseline.requestedDate = date;
@@ -175,17 +181,17 @@ async function loadUSGSDailyRange(startDate, endDate) {
   return Array.from(readingsByDate.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([date, readings]) => {
-      const releaseReadings = readings.filter((item) => item.role === "Release gage");
-      const indexReadings = releaseReadings.length ? releaseReadings : readings;
-      const totalCfs = indexReadings.reduce((sum, item) => sum + item.value, 0);
-      return baselineFromCfs(
+      const reference = referenceReading(readings);
+      if (!reference) return null;
+      return baselineFromReferenceCfs(
         date,
-        totalCfs,
+        reference.value,
         readings,
         "USGS OGC daily values API",
-        `${indexReadings.length} daily release/inflow gage${indexReadings.length === 1 ? "" : "s"} averaged in selected interval.`
+        `Lake James reference gage ${reference.site}: ${Math.round(reference.value)} ${reference.unit}.`
       );
-    });
+    })
+    .filter(Boolean);
 }
 
 window.usgsData = {
@@ -194,5 +200,6 @@ window.usgsData = {
   dailyUrl,
   dailyRangeUrl,
   dailyRequestOptions,
+  historicalReferenceGage: HISTORICAL_REFERENCE_GAGE,
   sites: BASIN_FLOW_GAGES
 };
