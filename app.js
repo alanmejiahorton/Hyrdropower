@@ -196,6 +196,25 @@ const developments = [
 const totalCapacity = developments.reduce((sum, d) => sum + d.capacity, 0);
 const totalStorage = developments.reduce((sum, d) => sum + d.storage, 0);
 const maxStationCapacity = Math.max(...developments.map((d) => d.capacity));
+const WATER_DENSITY_KG_M3 = 1000;
+const GRAVITY_M_S2 = 9.80665;
+const CFS_TO_CMS = 0.0283168466;
+const FT_TO_M = 0.3048;
+const TURBINE_FLOW_CALIBRATION = 1.02;
+const FRICTION_LOSS_CALIBRATION = 0.1;
+const hydroProfiles = {
+  bridgewater: { forebayMinFt: 1192, forebayFullFt: 1200, tailwaterBaseFt: 995.1, efficiency: 0.88, tailwaterRiseFtPerKcfs: 0.35, frictionFtPerKcfs2: 0.028 },
+  rhodhiss: { forebayMinFt: 992.1, forebayFullFt: 995.1, tailwaterBaseFt: 935, efficiency: 0.87, tailwaterRiseFtPerKcfs: 0.28, frictionFtPerKcfs2: 0.035 },
+  oxford: { forebayMinFt: 932, forebayFullFt: 935, tailwaterBaseFt: 838.1, efficiency: 0.88, tailwaterRiseFtPerKcfs: 0.25, frictionFtPerKcfs2: 0.03 },
+  lookout: { forebayMinFt: 836.1, forebayFullFt: 838.1, tailwaterBaseFt: 760, efficiency: 0.86, tailwaterRiseFtPerKcfs: 0.28, frictionFtPerKcfs2: 0.04 },
+  cowans: { forebayMinFt: 752, forebayFullFt: 760, tailwaterBaseFt: 647.5, efficiency: 0.9, tailwaterRiseFtPerKcfs: 0.2, frictionFtPerKcfs2: 0.018 },
+  mountain: { forebayMinFt: 644.5, forebayFullFt: 647.5, tailwaterBaseFt: 569.4, efficiency: 0.88, tailwaterRiseFtPerKcfs: 0.25, frictionFtPerKcfs2: 0.026 },
+  wylie: { forebayMinFt: 566.4, forebayFullFt: 569.4, tailwaterBaseFt: 417.2, efficiency: 0.89, tailwaterRiseFtPerKcfs: 0.22, frictionFtPerKcfs2: 0.024 },
+  fishing: { forebayMinFt: 414.2, forebayFullFt: 417.2, tailwaterBaseFt: 355.8, efficiency: 0.86, tailwaterRiseFtPerKcfs: 0.32, frictionFtPerKcfs2: 0.045 },
+  greatfalls: { forebayMinFt: 353.3, forebayFullFt: 355.8, tailwaterBaseFt: 284.8, efficiency: 0.86, tailwaterRiseFtPerKcfs: 0.33, frictionFtPerKcfs2: 0.052 },
+  rocky: { forebayMinFt: 281.9, forebayFullFt: 284.8, tailwaterBaseFt: 225.5, efficiency: 0.87, tailwaterRiseFtPerKcfs: 0.31, frictionFtPerKcfs2: 0.047 },
+  wateree: { forebayMinFt: 220.5, forebayFullFt: 225.5, tailwaterBaseFt: 145, efficiency: 0.88, tailwaterRiseFtPerKcfs: 0.26, frictionFtPerKcfs2: 0.035 }
+};
 const mapPositions = {
   bridgewater: { x: 145, y: 180, labelX: -18, labelY: 50, reservoirWidth: 72, reservoirHeight: 22, angle: -8 },
   rhodhiss: { x: 285, y: 160, labelX: -8, labelY: -28, reservoirWidth: 58, reservoirHeight: 15, angle: 2 },
@@ -265,8 +284,8 @@ const metricHelp = {
   },
   dispatch: {
     title: "Simulated Dispatch",
-    equation: "Simulated dispatch (MW) = sum(min(capacity MW, capacity MW x weightedDispatch x localFlow x storageDispatch))",
-    description: "Historical mode uses the Lake James reference discharge gage and storage-weighted peaking logic so large reservoirs are not throttled by changing downstream gage availability. Manual mode still applies individual release schedules."
+    equation: "Plant MW = min(capacity MW, eta x rho x g x Q x H / 1,000,000); H = forebay elevation - tailwater(Q) - friction(Q)",
+    description: "Historical mode uses the Lake James reference discharge gage to estimate turbine flow, then converts flow and dynamic net head into electrical power. Manual mode applies the same hydraulic equation after individual release schedules adjust turbine flow."
   },
   storage: {
     title: "Usable Storage",
@@ -368,16 +387,43 @@ function springStoragePenaltyPercent(spring) {
   return spring ? SPRING_STABILIZATION_PENALTY_POINTS : 0;
 }
 
-function releaseCfsPerMw(d) {
-  if (d.state === "NC") return 20;
-  if (d.state === "NC/SC") return 17;
-  return 14;
-}
-
 function localFlowByDevelopmentState(d) {
   if (d.state === "NC") return 1.02;
   if (d.state === "NC/SC") return 0.98;
   return 0.94;
+}
+
+function hydraulicProfile(d) {
+  return hydroProfiles[d.id];
+}
+
+function powerMwFromHydraulics(efficiency, flowCfs, netHeadFt) {
+  const flowCms = flowCfs * CFS_TO_CMS;
+  const headM = Math.max(0, netHeadFt) * FT_TO_M;
+  return (efficiency * WATER_DENSITY_KG_M3 * GRAVITY_M_S2 * flowCms * headM) / 1000000;
+}
+
+function designFlowCfs(d) {
+  const profile = hydraulicProfile(d);
+  const grossHeadFt = profile.forebayFullFt - profile.tailwaterBaseFt;
+  return d.capacity / Math.max(0.001, powerMwFromHydraulics(profile.efficiency, 1, grossHeadFt));
+}
+
+function forebayElevationFt(d, state) {
+  const profile = hydraulicProfile(d);
+  const storageRatio = Math.max(0, Math.min(1, (state.storagePercent - 31) / (99 - 31)));
+  return profile.forebayMinFt + (profile.forebayFullFt - profile.forebayMinFt) * storageRatio;
+}
+
+function hydraulicState(d, state, turbineFlowCfs) {
+  const profile = hydraulicProfile(d);
+  const flowKcfs = turbineFlowCfs / 1000;
+  const forebayFt = forebayElevationFt(d, state);
+  const tailwaterFt = profile.tailwaterBaseFt + profile.tailwaterRiseFtPerKcfs * flowKcfs;
+  const frictionLossFt = profile.frictionFtPerKcfs2 * FRICTION_LOSS_CALIBRATION * flowKcfs * flowKcfs;
+  const netHeadFt = Math.max(1, forebayFt - tailwaterFt - frictionLossFt);
+  const hydraulicMw = powerMwFromHydraulics(profile.efficiency, turbineFlowCfs, netHeadFt);
+  return { forebayFt, tailwaterFt, frictionLossFt, netHeadFt, hydraulicMw };
 }
 
 function scenarioState({ historical, inflow, demand, price, reserve, spring, outage }) {
@@ -442,9 +488,12 @@ function stationRows(state) {
     const storageDispatch = storagePeakingStations.includes(d.id) && state.storagePercent > 38 ? 1 : 0.88;
     const localFlow = Math.max(0.42, Math.min(1.28, (state.waterAvailability * 0.82 + upstreamStorageWeight * 1.05) * localFlowByDevelopmentState(d)));
     const scheduleEffect = Math.max(0.5, Math.min(1.35, releaseMultiplier));
-    const dispatch = out ? 0 : Math.min(d.capacity, d.capacity * state.dispatchFactor * localFlow * storageDispatch * (0.72 + scheduleEffect * 0.28));
-    const baseRelease = d.minFlow + dispatch * releaseCfsPerMw(d) + Math.max(0, state.inflow - 100) * 8;
-    const release = Math.round(Math.max(d.minFlow * 0.85, baseRelease * releaseMultiplier));
+    const targetFlowCfs = designFlowCfs(d) * state.dispatchFactor * localFlow * storageDispatch * (0.72 + scheduleEffect * 0.28) * TURBINE_FLOW_CALIBRATION;
+    const turbineFlowCfs = out ? 0 : Math.max(0, targetFlowCfs);
+    const hydraulic = hydraulicState(d, state, turbineFlowCfs);
+    const dispatch = out ? 0 : Math.min(d.capacity, hydraulic.hydraulicMw);
+    const spillOrBypassCfs = Math.max(0, state.inflow - 100) * 8;
+    const release = Math.round(Math.max(d.minFlow * 0.85, (d.minFlow + turbineFlowCfs + spillOrBypassCfs) * releaseMultiplier));
     availableCapacity += out ? 0 : d.capacity;
 
     let status = "Normal";
@@ -455,7 +504,7 @@ function stationRows(state) {
     else if (releaseMultiplier > 1.35 && d.usableStorage && d.usableStorage < 12000) status = "Drawdown";
     else if (state.spring && ["bridgewater", "cowans", "wylie", "wateree"].includes(d.id)) status = "Stabilize";
 
-    return { ...d, dispatch, release, releaseMultiplier, status };
+    return { ...d, dispatch, release, releaseMultiplier, turbineFlowCfs, ...hydraulic, status };
   });
 
   return { rows, availableCapacity };
@@ -670,8 +719,8 @@ function renderDispatch(rows) {
     tr.innerHTML = `
       <td><button class="table-link" data-id="${d.id}">${d.name}</button></td>
       <td>${d.reservoir}</td>
-      <td>${fmt(d.dispatch, 1)} MW / ${fmt((d.dispatch / d.capacity) * 100)}%</td>
-      <td>${fmt(d.release)} cfs / ${fmt(d.releaseMultiplier * 100)}%</td>
+      <td>${fmt(d.dispatch, 1)} MW / ${fmt((d.dispatch / d.capacity) * 100)}%<br><small>${fmt(d.netHeadFt, 1)} ft net head</small></td>
+      <td>${fmt(d.release)} cfs / ${fmt(d.releaseMultiplier * 100)}%<br><small>${fmt(d.turbineFlowCfs)} cfs turbine flow</small></td>
       <td><button class="status-pill ${statusClass}" data-status="${d.status}" type="button">${d.status}</button></td>
     `;
     body.appendChild(tr);
@@ -1436,7 +1485,7 @@ function selectDevelopment(id, focusMap = false) {
 
 function exportCsv() {
   const rows = stationRows(scenario()).rows;
-  const header = ["Development", "Reservoir", "State", "Capacity MW", "Storage acre-ft", "Dispatch MW", "Release cfs", "Release schedule %", "Status"];
+  const header = ["Development", "Reservoir", "State", "Capacity MW", "Storage acre-ft", "Dispatch MW", "Turbine flow cfs", "Forebay ft", "Tailwater ft", "Friction loss ft", "Net head ft", "Release cfs", "Release schedule %", "Status"];
   const lines = rows.map((d) => [
     d.name,
     d.reservoir,
@@ -1444,6 +1493,11 @@ function exportCsv() {
     d.capacity.toFixed(3),
     d.storage,
     d.dispatch.toFixed(2),
+    d.turbineFlowCfs.toFixed(0),
+    d.forebayFt.toFixed(2),
+    d.tailwaterFt.toFixed(2),
+    d.frictionLossFt.toFixed(2),
+    d.netHeadFt.toFixed(2),
     d.release,
     Math.round(d.releaseMultiplier * 100),
     d.status
