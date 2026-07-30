@@ -217,15 +217,15 @@ const hydroProfiles = {
 };
 const mapPositions = {
   bridgewater: { x: 145, y: 180, labelX: -18, labelY: 50, reservoirWidth: 72, reservoirHeight: 22, angle: -8 },
-  rhodhiss: { x: 285, y: 160, labelX: -8, labelY: -28, reservoirWidth: 58, reservoirHeight: 15, angle: 2 },
-  oxford: { x: 430, y: 175, labelX: -18, labelY: -26, reservoirWidth: 68, reservoirHeight: 18, angle: 4 },
-  lookout: { x: 545, y: 146, labelX: 20, labelY: -25, reservoirWidth: 54, reservoirHeight: 15, angle: -18 },
-  cowans: { x: 640, y: 270, labelX: -76, labelY: -10, reservoirWidth: 118, reservoirHeight: 76, angle: -18 },
-  mountain: { x: 628, y: 365, labelX: -106, labelY: 0, reservoirWidth: 42, reservoirHeight: 15, angle: 82 },
-  wylie: { x: 600, y: 500, labelX: -64, labelY: -10, reservoirWidth: 86, reservoirHeight: 54, angle: -35 },
-  fishing: { x: 628, y: 660, labelX: -36, labelY: -18, reservoirWidth: 36, reservoirHeight: 13, angle: 82 },
-  greatfalls: { x: 652, y: 704, labelX: -82, labelY: -2, reservoirWidth: 46, reservoirHeight: 16, angle: 18 },
-  rocky: { x: 738, y: 770, labelX: 20, labelY: -6, reservoirWidth: 82, reservoirHeight: 42, angle: -18 },
+  rhodhiss: { x: 285, y: 160, labelX: -8, labelY: -48, reservoirWidth: 58, reservoirHeight: 15, angle: 2 },
+  oxford: { x: 430, y: 175, labelX: -38, labelY: 55, reservoirWidth: 68, reservoirHeight: 18, angle: 4 },
+  lookout: { x: 545, y: 146, labelX: 70, labelY: -25, reservoirWidth: 54, reservoirHeight: 15, angle: -18 },
+  cowans: { x: 640, y: 270, labelX: -46, labelY: -50, reservoirWidth: 118, reservoirHeight: 76, angle: -18 },
+  mountain: { x: 628, y: 365, labelX: -120, labelY: -30, reservoirWidth: 42, reservoirHeight: 15, angle: 82 },
+  wylie: { x: 600, y: 500, labelX: -110, labelY: -10, reservoirWidth: 86, reservoirHeight: 54, angle: -35 },
+  fishing: { x: 628, y: 660, labelX: 50, labelY: -18, reservoirWidth: 36, reservoirHeight: 13, angle: 82 },
+  greatfalls: { x: 652, y: 704, labelX: -192, labelY: -2, reservoirWidth: 46, reservoirHeight: 16, angle: 18 },
+  rocky: { x: 738, y: 770, labelX: 50, labelY: -6, reservoirWidth: 82, reservoirHeight: 42, angle: -18 },
   wateree: { x: 730, y: 850, labelX: -8, labelY: 54, reservoirWidth: 122, reservoirHeight: 46, angle: -6 }
 };
 
