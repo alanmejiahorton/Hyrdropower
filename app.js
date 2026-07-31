@@ -224,7 +224,7 @@ const mapPositions = {
   mountain: { x: 628, y: 365, labelX: -120, labelY: -30, reservoirWidth: 42, reservoirHeight: 15, angle: 82 },
   wylie: { x: 600, y: 500, labelX: -110, labelY: -10, reservoirWidth: 86, reservoirHeight: 54, angle: -35 },
   fishing: { x: 628, y: 660, labelX: 50, labelY: -18, reservoirWidth: 36, reservoirHeight: 13, angle: 82 },
-  greatfalls: { x: 652, y: 704, labelX: -192, labelY: -2, reservoirWidth: 46, reservoirHeight: 16, angle: 18 },
+  greatfalls: { x: 652, y: 704, labelX: -192, labelY: 12, reservoirWidth: 46, reservoirHeight: 16, angle: 18 },
   rocky: { x: 738, y: 770, labelX: 50, labelY: -6, reservoirWidth: 82, reservoirHeight: 42, angle: -18 },
   wateree: { x: 730, y: 850, labelX: -8, labelY: 54, reservoirWidth: 122, reservoirHeight: 46, angle: -6 }
 };
@@ -284,8 +284,8 @@ const metricHelp = {
   },
   dispatch: {
     title: "Simulated Dispatch",
-    equation: "Plant MW = min(capacity MW, eta x rho x g x Q x H / 1,000,000); H = forebay elevation - tailwater(Q) - friction(Q)",
-    description: "Historical mode uses the Lake James reference discharge gage to estimate turbine flow, then converts flow and dynamic net head into electrical power. Manual mode applies the same hydraulic equation after individual release schedules adjust turbine flow."
+    equation: "power_i,t (MW) = min(gamma x release x head x efficiency, maxPowerCapacity); gamma = 0.00102",
+    description: "release is turbine release in AF/h, head is dynamic net head in ft, efficiency is the plant efficiency factor, and maxPowerCapacity is the authorized MW cap for each development."
   },
   storage: {
     title: "Usable Storage",
@@ -1017,6 +1017,14 @@ function downsampleDispatch(dailyPoints, mode) {
   }));
 }
 
+function dailyDispatch(dailyPoints) {
+  return dailyPoints.map((point) => ({
+    month: point.date.slice(5),
+    dispatch: point.dispatch,
+    count: 1
+  }));
+}
+
 function weeklyAverageDispatch(dailyPoints, startDate) {
   const buckets = new Map();
   dailyPoints.forEach((point) => {
@@ -1034,7 +1042,7 @@ function weeklyAverageDispatch(dailyPoints, startDate) {
   }));
 }
 
-function drawHistoryDispatchChart(points) {
+function drawHistoryDispatchChart(points, grain) {
   const svg = graphControls.chart;
   svg.innerHTML = "";
   const width = 960;
@@ -1071,7 +1079,7 @@ function drawHistoryDispatchChart(points) {
   svg.appendChild(svgEl("path", { class: "chart-line", d: line }));
   [
     { text: "Simulated dispatch (MW)", x: 8, y: 24 },
-    { text: points[0].month.length === 5 ? "Historical week" : points[0].month.length === 4 ? "Historical year" : "Historical month", x: width / 2 - 45, y: height - 10 }
+    { text: grain === "day" ? "Historical day" : grain === "week" ? "Historical week" : grain === "year" ? "Historical year" : "Historical month", x: width / 2 - 45, y: height - 10 }
   ].forEach((label) => {
     const text = svgEl("text", { class: "chart-label", x: label.x, y: label.y });
     text.textContent = label.text;
@@ -1085,25 +1093,26 @@ async function buildHistoryGraph() {
   const downsample = graphControls.downsample.value;
   const startDate = monthStart(start);
   const endDate = rangeEndDate(end);
-  const useWeekly = daysBetween(startDate, endDate) <= 366;
+  const requestedDays = daysBetween(startDate, endDate);
+  const useDaily = requestedDays <= 31;
+  const useWeekly = requestedDays > 31 && requestedDays <= 366;
   const cacheKey = `${startDate}/${endDate}`;
   graphControls.status.textContent = `Fetching daily USGS values from ${start} to ${end}...`;
   if (!historyRangeCache.has(cacheKey)) {
     historyRangeCache.set(cacheKey, window.usgsData.loadUSGSDailyRange(startDate, endDate));
   }
   const baselines = await historyRangeCache.get(cacheKey);
-  const requestedDays = daysBetween(startDate, endDate);
   const excludedDays = Math.max(0, requestedDays - baselines.length);
   const dailyPoints = baselines.map((baseline) => {
     const state = scenarioFromBaseline(baseline);
     const dispatch = stationRows(state).rows.reduce((sum, d) => sum + d.dispatch, 0);
     return { date: baseline.sourceDate, dispatch };
   });
-  const points = useWeekly ? weeklyAverageDispatch(dailyPoints, startDate) : downsampleDispatch(dailyPoints, downsample);
-  drawHistoryDispatchChart(points);
-  graphControls.status.textContent = useWeekly
-    ? `${start} to ${end}: weekly average simulated dispatch in MW. ${fmt(excludedDays)} date${excludedDays === 1 ? "" : "s"} excluded where Lake James reference gage was unavailable.`
-    : `${start} to ${end}: ${downsample === "year" ? "yearly" : "monthly"} average simulated dispatch in MW. ${fmt(excludedDays)} date${excludedDays === 1 ? "" : "s"} excluded where Lake James reference gage was unavailable.`;
+  const grain = useDaily ? "day" : useWeekly ? "week" : downsample === "year" ? "year" : "month";
+  const points = useDaily ? dailyDispatch(dailyPoints) : useWeekly ? weeklyAverageDispatch(dailyPoints, startDate) : downsampleDispatch(dailyPoints, downsample);
+  drawHistoryDispatchChart(points, grain);
+  const grainLabel = grain === "day" ? "daily" : grain === "week" ? "weekly average" : grain === "year" ? "yearly average" : "monthly average";
+  graphControls.status.textContent = `${start} to ${end}: ${grainLabel} simulated dispatch in MW. ${fmt(excludedDays)} date${excludedDays === 1 ? "" : "s"} excluded where Lake James reference gage was unavailable.`;
 }
 
 const monthLengths = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
